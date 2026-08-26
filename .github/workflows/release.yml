@@ -1,0 +1,195 @@
+#
+# Builds native-layout binaries, smokes each one on the OS it ships for, then publishes.
+#
+# Publishing waits on smoke-tests. A tag v*.*.* is a real release; workflow_dispatch without a
+# tag publishes a pre-release named pre-release.
+#
+name: Release
+
+env:
+  ZIG_VERSION: "0.16.0"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  prepare:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      is-release: ${{ steps.resolve.outputs.is-release }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: resolve
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            IS_RELEASE="true"
+            VERSION="${TAG#v}"
+          else
+            TAG="pre-release"
+            IS_RELEASE="false"
+            VERSION="0.0.1-pre"
+          fi
+          {
+            echo "tag=$TAG"
+            echo "is-release=$IS_RELEASE"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - zig-target: x86_64-linux
+            artifact: skl-linux-x64
+            binary: bin/x64/linux/skl
+          - zig-target: x86_64-windows
+            artifact: skl-windows-x64
+            binary: bin/x64/win/skl.exe
+          - zig-target: x86_64-macos
+            artifact: skl-macos-x64
+            binary: bin/x64/mac/skl
+          - zig-target: aarch64-macos
+            artifact: skl-macos-arm64
+            binary: bin/arm64/mac/skl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Stamp version
+        run: |
+          cat > src/lib/version.zig <<EOF
+          //
+          // Which build this is. Written by the release workflow from the tag.
+          //
+
+          //
+          // The version string skl --version prints.
+          //
+          pub const version = "${{ needs.prepare.outputs.version }}";
+          EOF
+
+      - name: Build ${{ matrix.zig-target }}
+        run: zig build release -Dtarget=${{ matrix.zig-target }}
+
+      - name: Upload ${{ matrix.artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  smoke-tests:
+    needs: build
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: skl-linux-x64
+            binary-dir: bin/x64/linux
+            binary-name: skl
+          - os: macos-latest
+            artifact: skl-macos-arm64
+            binary-dir: bin/arm64/mac
+            binary-name: skl
+          - os: macos-15-intel
+            artifact: skl-macos-x64
+            binary-dir: bin/x64/mac
+            binary-name: skl
+          - os: windows-latest
+            artifact: skl-windows-x64
+            binary-dir: bin/x64/win
+            binary-name: skl.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Windows directory symlinks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" -Name AllowDevelopmentWithoutDevLicense -PropertyType DWord -Value 1 -Force
+
+      - name: Download ${{ matrix.artifact }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary-dir }}
+
+      - name: Make it executable
+        run: chmod +x ${{ matrix.binary-dir }}/${{ matrix.binary-name }}
+
+      - name: Check the executable runs
+        run: ./${{ matrix.binary-dir }}/${{ matrix.binary-name }} --help
+
+      - name: Run smoke tests against the executable
+        run: ./scripts/smoke-tests.sh --binary
+
+  create-release:
+    timeout-minutes: 15
+    needs: [prepare, build, smoke-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download every artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create compressed archives
+        run: |
+          cd ./artifacts/skl-linux-x64 && chmod +x skl && tar -czf ../skl-linux-x64.tar.gz skl && cd ../..
+          cd ./artifacts/skl-macos-x64 && chmod +x skl && tar -czf ../skl-macos-x64.tar.gz skl && cd ../..
+          cd ./artifacts/skl-macos-arm64 && chmod +x skl && tar -czf ../skl-macos-arm64.tar.gz skl && cd ../..
+          cd ./artifacts/skl-windows-x64 && zip ../skl-windows-x64.zip skl.exe && cd ../..
+          ls -la ./artifacts
+
+      - name: Delete the previous pre-release
+        if: needs.prepare.outputs.is-release != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete pre-release --yes --cleanup-tag || true
+        continue-on-error: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.is-release == 'true' && format('skl {0}', needs.prepare.outputs.tag) || 'skl Pre-release' }}
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.is-release != 'true' }}
+          files: |
+            ./artifacts/skl-linux-x64.tar.gz
+            ./artifacts/skl-windows-x64.zip
+            ./artifacts/skl-macos-x64.tar.gz
+            ./artifacts/skl-macos-arm64.tar.gz
+          body: |
+            ${{ needs.prepare.outputs.is-release == 'true' && format('skl {0}', needs.prepare.outputs.tag) || format('skl pre-release — {0}', github.sha) }}
+
+            ## Download
+            - **Linux**: `skl-linux-x64.tar.gz`
+            - **Windows**: `skl-windows-x64.zip`
+            - **macOS (Intel)**: `skl-macos-x64.tar.gz`
+            - **macOS (Apple Silicon)**: `skl-macos-arm64.tar.gz`

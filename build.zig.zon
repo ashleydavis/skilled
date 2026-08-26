@@ -1,0 +1,24 @@
+.{
+    // The package name, as an enum literal rather than a string.
+    .name = .skilled,
+
+    // Matches the version string in src/lib/version.zig until a release workflow stamps a tag.
+    .version = "0.0.1",
+
+    // The oldest compiler this builds with. 0.16 is the current stable release; its filesystem API
+    // lives under std.Io, which earlier versions do not have.
+    .minimum_zig_version = "0.16.0",
+
+    // Identifies the package to the build system. Generated once and never changed.
+    .fingerprint = 0xd495bf31c2cabee4,
+
+    // What goes into a package of this project. Everything else (build outputs, throwaway trees)
+    // is deliberately left out.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "docs",
+        "README.md",
+    },
+}
