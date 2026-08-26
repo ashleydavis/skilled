@@ -6,6 +6,22 @@ const std = @import("std");
 const files = @import("files.zig");
 const testing = std.testing;
 
+//
+// Windows CI failed when dest used `/` and readLink used `\`. SamePath is the comparison that fix uses.
+//
+test "samePath is true for identical bytes and false when they differ" {
+    try testing.expect(files.samePath("/tmp/a/b", "/tmp/a/b"));
+    try testing.expect(!files.samePath("/tmp/a/b", "/tmp/a/c"));
+    try testing.expect(!files.samePath("/tmp/a", "/tmp/ab"));
+}
+
+//
+// Windows CI failed when dest used `/` and readLink used `\`. This is the comparison that fix uses.
+//
+test "samePath treats slash and backslash as the same separator only on Windows" {
+    try testing.expectEqual(std.fs.path.sep == '\\', files.samePath("/tmp/foo/bar", "\\tmp\\foo\\bar"));
+}
+
 test "describeError words the common failures the way a person expects" {
     try testing.expectEqualStrings("no such file or directory", files.describeError(error.FileNotFound));
     try testing.expectEqualStrings("permission denied", files.describeError(error.AccessDenied));

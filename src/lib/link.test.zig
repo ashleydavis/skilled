@@ -76,7 +76,12 @@ fn expectSymlink(io: std.Io, path: []const u8, dest: []const u8) !void {
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const n = try std.Io.Dir.cwd().readLink(io, path, &buffer);
-    try testing.expectEqualStrings(dest, buffer[0..n]);
+    //
+    // Windows CI: dest had `/`, readLink had `\`. Byte equality failed the assertion.
+    //
+    if (!files.samePath(dest, buffer[0..n])) {
+        try testing.expectEqualStrings(dest, buffer[0..n]);
+    }
 }
 
 //

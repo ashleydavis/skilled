@@ -211,7 +211,10 @@ test "clone argv uses -- and the store host/owner/repo dest" {
         dest,
     });
     try testing.expect(scripted.calls.items[0].cwd == null);
-    try testing.expect(std.mem.endsWith(u8, dest, "store/github.com/acme/skills"));
+    //
+    // Windows CI failed asserting dest ends with `store/github.com/acme/skills`: joinPath uses `\`.
+    //
+    try testing.expect(std.mem.endsWith(u8, dest, try files.joinPath(allocator, &.{ "store", "github.com", "acme", "skills" })));
 }
 
 test "showFile argv is git show ref:path" {

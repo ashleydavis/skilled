@@ -139,12 +139,13 @@ fn unlinkTree(
     const n = std.Io.Dir.cwd().readLink(io, link_path, &buffer) catch |err| {
         return fail.set("cannot read symlink {s}: {s}", .{ link_path, files.describeError(err) });
     };
-    if (!std.mem.eql(u8, buffer[0..n], store_tree)) {
+    //
+    // Windows CI: dest had `/`, readLink had `\`. Byte equality skipped the delete.
+    //
+    if (!files.samePath(buffer[0..n], store_tree)) {
         return;
     }
-    std.Io.Dir.cwd().deleteFile(io, link_path) catch |err| {
-        return fail.set("cannot remove symlink {s}: {s}", .{ link_path, files.describeError(err) });
-    };
+    try removeSymlink(io, link_path, fail);
 }
 
 //
@@ -200,10 +201,28 @@ fn placeSymlink(io: std.Io, dest: []const u8, link_path: []const u8, fail: *Fail
     const n = std.Io.Dir.cwd().readLink(io, link_path, &buffer) catch |err| {
         return fail.set("cannot read symlink {s}: {s}", .{ link_path, files.describeError(err) });
     };
-    if (std.mem.eql(u8, buffer[0..n], dest)) {
+    //
+    // Windows CI: dest had `/`, readLink had `\`. Byte equality made a correct link look foreign.
+    //
+    if (files.samePath(buffer[0..n], dest)) {
         return;
     }
     return fail.set("{s} already points at {s}, not {s}", .{ link_path, buffer[0..n], dest });
+}
+
+//
+// Deletes a symlink at link_path. Directory symlinks on Windows look like directories to
+// deleteFile, so IsDir falls through to deleteDir rather than leaving the link in place.
+//
+fn removeSymlink(io: std.Io, link_path: []const u8, fail: *Failure) failure.Error!void {
+    std.Io.Dir.cwd().deleteFile(io, link_path) catch |err| switch (err) {
+        error.IsDir => {
+            std.Io.Dir.cwd().deleteDir(io, link_path) catch |dir_err| {
+                return fail.set("cannot remove symlink {s}: {s}", .{ link_path, files.describeError(dir_err) });
+            };
+        },
+        else => return fail.set("cannot remove symlink {s}: {s}", .{ link_path, files.describeError(err) }),
+    };
 }
 
 //

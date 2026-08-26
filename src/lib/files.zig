@@ -80,6 +80,29 @@ pub fn joinPath(allocator: std.mem.Allocator, segments: []const []const u8) std.
 }
 
 //
+// True when two paths name the same location on this host.
+//
+// Windows CI failed because readLink returns `\tmp\...` while dest was `/tmp/...\store\skills`.
+// Byte equality treated a correct namespace link as pointing elsewhere, so install/update errored
+// and unlink skipped the delete.
+//
+pub fn samePath(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) {
+        return false;
+    }
+    for (a, b) |left, right| {
+        if (left == right) {
+            continue;
+        }
+        if (path_util.isSep(left) and path_util.isSep(right)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+//
 // Creates a directory and every directory above it, doing nothing when it is already there.
 //
 pub fn makeDirPath(io: std.Io, path: []const u8) !void {
@@ -141,10 +164,22 @@ pub const TemporaryDir = struct {
         io.random(&random_bytes);
         const suffix = std.fmt.bytesToHex(random_bytes, .lower);
 
-        const path = try std.fmt.allocPrint(path_allocator, "/tmp/skilled-test-{s}", .{suffix});
-        errdefer path_allocator.free(path);
+        const raw = try std.fmt.allocPrint(path_allocator, "/tmp/skilled-test-{s}", .{suffix});
+        errdefer path_allocator.free(raw);
+        try makeDirPath(io, raw);
 
-        try makeDirPath(io, path);
+        //
+        // Windows cannot follow a symlink whose target is `/tmp/...` or `\tmp\...`: those have no
+        // drive letter, and CI failed with OBJECT_PATH_NOT_FOUND reading a file through the
+        // namespace link. realPath turns this into e.g. `D:\tmp\...` so dest is a followable path.
+        //
+        var dir = try std.Io.Dir.cwd().openDir(io, raw, .{});
+        defer dir.close(io);
+        var real_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const n = try dir.realPath(io, &real_buf);
+        const path = try path_allocator.dupe(u8, real_buf[0..n]);
+        path_allocator.free(raw);
+
         return .{ .path = path, .io = io };
     }
 
