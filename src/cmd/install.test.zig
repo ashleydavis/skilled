@@ -26,8 +26,8 @@ test "install links all packages in fixture YAML" {
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try install.run(&ctx, .{}));
 
-    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
-    const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "cmd" });
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "cmd" });
     try expectSymlink(scenario.io(), skills_link);
     try expectSymlink(scenario.io(), commands_link);
 }
@@ -77,7 +77,7 @@ test "install partial failure keeps earlier packages" {
     try testing.expectError(error.Failed, install.run(&ctx, .{}));
     try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "acme/empty") != null);
 
-    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
     try expectSymlink(scenario.io(), skills_link);
 
     const empty_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "empty" });

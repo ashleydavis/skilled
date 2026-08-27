@@ -164,8 +164,8 @@ fn expectFromInstalledPackages(scenario: *harness.Scenario) !void {
     try testing.expect(pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "store", "github.com", "acme", "skills",
     })));
-    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
-    const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "cmd" });
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "cmd" });
     try expectSymlink(scenario.io(), skills_link);
     try expectSymlink(scenario.io(), commands_link);
 }

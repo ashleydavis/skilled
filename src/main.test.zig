@@ -88,7 +88,7 @@ test "init --from through Commander writes YAML and installs listed packages" {
     try testing.expect(scenario.git.calls.items.len >= 2);
     const dest = scenario.git.calls.items[0].argv[scenario.git.calls.items[0].argv.len - 1];
     try testing.expect(std.mem.indexOf(u8, dest, ".skilled") == null);
-    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
     const st = try std.Io.Dir.cwd().statFile(scenario.io(), skills_link, .{ .follow_symlinks = false });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }

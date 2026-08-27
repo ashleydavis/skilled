@@ -29,7 +29,7 @@ test "remove unlinks and drops the YAML entry, leaving the store clone" {
     });
     try testing.expect(skilled.files.fileExists(scenario.io(), dest));
 
-    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false }));
 }
 
