@@ -250,6 +250,14 @@ write_empty_yaml() {
 # HOME comes from mktemp -d then pwd -P (macOS /var is a symlink). Product paths (~/.skilled,
 # ~/.config, ~/.cursor, ~/.ssh) all land here. Two overlapping smoke runs cannot share it.
 #
+# GitHub Actions Linux sets XDG_CONFIG_HOME to the runner's real ~/.config. Release smoke
+# then wrote global YAML there (`init -g` printed /home/runner/.config/...) instead of
+# $HOME/.config. Unset it so -g uses <home>/.config/skilled/skl.yaml.
+#
+# Git Bash `ln -s` copies unless MSYS asks for native links. Release smoke test 39 then
+# failed `[ -L $HOME/.config/skilled/skl.yaml ]` on Windows. Developer Mode is already
+# enabled in the workflow; this makes `ln` use it.
+#
 # READ THIS BEFORE ADDING GIT COMMANDS.
 #
 # fixture_git is the only wrapper that may run git init / add / commit / config. It sets GIT_DIR
@@ -261,6 +269,10 @@ write_empty_yaml() {
 HOME="$(cd "$(mktemp -d)" && pwd -P)"
 export HOME
 export USERPROFILE="$HOME"
+unset XDG_CONFIG_HOME
+if [ "${OS:-}" = "Windows_NT" ]; then
+    export MSYS="winsymlinks:nativestrict"
+fi
 export GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_TERMINAL_PROMPT=0
