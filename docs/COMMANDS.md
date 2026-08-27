@@ -6,7 +6,7 @@
 |---------|----------------|
 | `skl help` | Same as `--help` / `-h`. |
 | `skl version` | Same as `--version` / `-V`. |
-| `skl init` | Create `skl.yaml` with `packages: []`, or create it from `--from`. |
+| `skl init` | Create `skl.yaml` with `packages: []`. `--from` also installs those packages. |
 | `skl install` / `skl i` | Clone/update every package in the active YAML and link them. |
 | `skl add <repo>` | Clone, scan, append YAML, and link. Requires `--ns`. |
 | `skl add --from <spec>` | Append packages from a YAML file in git into the existing `skl.yaml`. |
@@ -48,18 +48,19 @@ with `no skl.yaml; run skl init`.
 
 `--from <spec>` locates a YAML file inside a git repo. `skl` clones that repo
 into a temporary directory, reads one file with `git show`, and deletes the temp
-clone. It does not clone the skill packages in the file or create agent links;
-run `skl install` after.
+clone.
 
 `skl init --from <spec>` creates `skl.yaml` from that file when the config is
-missing or still `packages: []`. If the file already lists packages, `init
---from` errors; use `skl add --from` instead.
+missing or still `packages: []`, then clones and links the packages it lists. If
+the file already lists packages, `init --from` errors; use `skl add --from`
+instead.
 
 `skl add --from <spec>` requires an existing `skl.yaml`. It appends packages
 from the file and keeps entries already there. An incoming namespace that is
 already used by a different repo is an error (YAML unchanged). The same
 namespace and same package is skipped. `<repo>` and `--from` are mutually
-exclusive; `--ns` is not used with `--from`.
+exclusive; `--ns` is not used with `--from`. Run `skl install` after `add
+--from` to clone and link.
 
 First matching split rule wins:
 

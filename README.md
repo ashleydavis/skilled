@@ -87,7 +87,6 @@ skl -g add ashleydavis/skl-example-skills --ns demo
 
 ```sh
 skl init -g --from https://github.com/ashleydavis/skl-example-config/blob/main/my-team/skl.yaml
-skl -g install
 ```
 
 After a bare `skl init -g`, add that file’s packages into the existing YAML:
@@ -111,7 +110,6 @@ skl add ashleydavis/skl-example-skills --ns demo
 
 ```sh
 skl init --from https://github.com/ashleydavis/skl-example-config/blob/main/my-team/skl.yaml
-skl install
 ```
 
 After a bare `skl init`, add that file’s packages into the existing YAML:

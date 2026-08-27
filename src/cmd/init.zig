@@ -2,7 +2,8 @@
 // `skl init`: create skl.yaml in the active scope, empty or from `--from`.
 //
 // Plain init writes `packages: []` when the file is missing. `--from` fills a missing or empty
-// file from a YAML file in git. Neither form wipes a list the user already built.
+// file from a YAML file in git, then installs those packages. Neither form wipes a list the user
+// already built.
 //
 
 const skilled = @import("skilled");
@@ -86,12 +87,12 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
 pub fn buildCommand(ctx: *const Context) *Command {
     return Command.init(ctx.allocator, "init")
         .description("Create skl.yaml with packages: [].")
-        .option("--from <spec>", "A YAML file inside a git repo.", null)
+        .option("--from <spec>", "A YAML file inside a git repo; also install its packages.", null)
         .action(ctx, action);
 }
 
 //
-// Fetches YAML and writes it when the config is missing or still `packages: []`.
+// Fetches YAML, writes it when the config is missing or still `packages: []`, then installs.
 //
 fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.Error!u8 {
     const scope = try shared.scopeOf(ctx, global);
@@ -104,7 +105,7 @@ fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.
     const fetched = try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec, ctx.fail);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, fetched, ctx.fail);
     try shared.line(ctx, "wrote {s}", .{scope.config_path});
-    return 0;
+    return shared.installAll(ctx, scope, fetched);
 }
 
 //

@@ -54,8 +54,9 @@ URL.
 Namespaces are unique per config file.
 
 `skl init --from` creates `skl.yaml` from a YAML file in a git repo when the
-config is missing or still `packages: []`. `skl add --from` appends that file’s
-packages into an existing `skl.yaml` and keeps entries already there.
+config is missing or still `packages: []`, then clones and links the packages
+that file lists. `skl add --from` appends that file’s packages into an existing
+`skl.yaml` and keeps entries already there; run `skl install` after `add --from`.
 
 Writes to `skl.yaml` are stow-safe: if the path is a symlink to a regular file,
 `skl` opens that file and writes through it. If the path does not exist, `skl`

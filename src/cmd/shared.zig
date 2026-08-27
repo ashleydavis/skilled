@@ -34,6 +34,16 @@ const files = skilled.files;
 const git = skilled.git;
 
 //
+// Namespace symlinks into Cursor and Claude, used when `--from` finishes by installing.
+//
+const link = skilled.link;
+
+//
+// Layout check after clone, so an empty package fails this entry rather than linking nothing.
+//
+const package = skilled.package;
+
+//
 // Store and scope paths resolved from home/cwd.
 //
 const paths = skilled.paths;
@@ -158,6 +168,45 @@ pub fn ensureCloned(ctx: *const Context, spec: []const u8, spinner: *progress.Pr
     };
     spinner.finish();
     return resolved;
+}
+
+//
+// Clones missing packages and links each namespace in `file`.
+//
+// Same work as `skl install`. `init --from` calls this so the developer does not run a second
+// command after the YAML is written. On package *k* of *N* failing, packages 1..k-1 stay cloned
+// and linked; there is no rollback.
+//
+pub fn installAll(ctx: *const Context, scope: paths.Scope, file: config.File) skilled.failure.Error!u8 {
+    var spinner = newSpinner(ctx);
+    defer spinner.finish();
+
+    for (file.packages) |pkg| {
+        var one_fail = Failure.init(ctx.allocator);
+        var one_ctx = ctx.*;
+        one_ctx.fail = &one_fail;
+        installOne(&one_ctx, scope, pkg, &spinner) catch {
+            return ctx.fail.set("install failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
+        };
+    }
+    return 0;
+}
+
+//
+// Clone if missing, scan, then link. A Failure from a helper is left as-is; installAll wraps it.
+//
+fn installOne(
+    ctx: *const Context,
+    scope: paths.Scope,
+    pkg: config.Package,
+    spinner: *progress.Progress,
+) skilled.failure.Error!void {
+    const resolved = try ensureCloned(ctx, pkg.repo, spinner);
+    _ = try package.scan(ctx.io, ctx.allocator, resolved.dest, ctx.fail);
+    spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ pkg.namespace, resolved.parsed.repo }));
+    try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
+    spinner.finish();
+    try line(ctx, "{s} {s}", .{ ctx.style.check(), pkg.repo });
 }
 
 //

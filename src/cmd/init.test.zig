@@ -69,6 +69,7 @@ test "init --from creates a missing file from the fetched YAML" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
+    scenario.git.commands_repo = "cmds";
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
 
@@ -77,13 +78,14 @@ test "init --from creates a missing file from the fetched YAML" {
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: demo") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/cmds") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: cmd") != null);
-    try expectFromDidNotUseStore(scenario);
+    try expectFromInstalledPackages(scenario);
 }
 
 test "init --from fills packages: []" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
+    scenario.git.commands_repo = "cmds";
     try scenario.writeProjectYaml("packages: []\n");
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
@@ -91,6 +93,7 @@ test "init --from fills packages: []" {
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/cmds") != null);
+    try expectFromInstalledPackages(scenario);
 }
 
 test "init --from errors when packages are already listed and leaves YAML unchanged" {
@@ -148,18 +151,31 @@ test "missing-config is not an error for init" {
 }
 
 //
-// `--from` must clone into a throwaway dir, not the package store, and must delete that clone.
+// `--from` clones the config repo into a throwaway dir, then clones listed packages into the store
+// and links them.
 //
-fn expectFromDidNotUseStore(scenario: *harness.Scenario) !void {
+fn expectFromInstalledPackages(scenario: *harness.Scenario) !void {
     const dest = cloneDest(scenario) orelse return error.TestUnexpectedResult;
     try testing.expect(std.mem.indexOf(u8, dest, ".skilled") == null);
     try testing.expect(!pathExists(scenario, dest));
     try testing.expect(!pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "store", "github.com", "acme", "skl-config",
     })));
-    try testing.expect(!pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
+    try testing.expect(pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "store", "github.com", "acme", "skills",
     })));
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
+    const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "cmd" });
+    try expectSymlink(scenario.io(), skills_link);
+    try expectSymlink(scenario.io(), commands_link);
+}
+
+//
+// Asserts path exists as a symlink.
+//
+fn expectSymlink(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
 
 //

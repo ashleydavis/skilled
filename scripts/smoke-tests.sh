@@ -498,7 +498,7 @@ assert_file_exists "$GLOBAL_YAML"
 assert_file_contains "$GLOBAL_YAML" "packages: []"
 assert_file_contains "$CWD_INIT/skl.yaml" "packages: []"
 
-scenario "12. init --from writes packages, does not clone or link, deletes the temp clone"
+scenario "12. init --from writes packages, clones and links them, deletes the temp config clone"
 run_cli_in "$CWD_INIT" init --from acme/skl-config:teams/platform.yaml
 assert_exit 0
 assert_file_contains "$CWD_INIT/skl.yaml" "acme/skills"
@@ -506,9 +506,11 @@ assert_file_contains "$CWD_INIT/skl.yaml" "namespace: demo"
 assert_file_contains "$CWD_INIT/skl.yaml" "acme/cmds"
 assert_file_contains "$CWD_INIT/skl.yaml" "namespace: cmd"
 assert_not_exists "$STORE/github.com/acme/skl-config"
-assert_not_exists "$STORE/github.com/acme/skills"
-assert_not_exists "$CWD_INIT/.cursor/commands/demo"
-assert_not_exists "$CWD_INIT/.claude/commands/demo"
+assert_dir_exists "$STORE/github.com/acme/skills"
+assert_symlink "$CWD_INIT/.cursor/commands/demo" "github.com/acme/skills"
+assert_symlink "$CWD_INIT/.claude/commands/demo" "github.com/acme/skills"
+assert_symlink "$CWD_INIT/.cursor/commands/cmd" "github.com/acme/cmds"
+assert_symlink "$CWD_INIT/.claude/commands/cmd" "github.com/acme/cmds"
 
 scenario "13. init -g --from writes global YAML from an SSH spec"
 run_cli_in "$CWD_INIT" init -g --from git@github.com:acme/skl-config.git:teams/platform.yaml
@@ -526,7 +528,6 @@ assert_exit 0
 assert_file_contains "$CWD_INIT/skl.yaml" "acme/skills"
 assert_file_contains "$CWD_INIT/skl.yaml" "acme/cmds"
 assert_not_exists "$STORE/github.com/acme/skl-config"
-assert_not_exists "$STORE/github.com/acme/skills"
 
 scenario "47. init --from refused when packages already exist; YAML unchanged"
 cp "$CWD_INIT/skl.yaml" "$HOME/cwd-init-yaml.before"
@@ -621,11 +622,8 @@ fi
 #
 ####################################################################################################
 
-scenario "23. install from --from YAML clones and links; second install is idempotent"
+scenario "23. init --from clones and links; second install is idempotent"
 run_cli_in "$CWD_INSTALL" init --from acme/skl-config:teams/platform.yaml
-assert_exit 0
-assert_not_exists "$CWD_INSTALL/.cursor/commands/demo"
-run_cli_in "$CWD_INSTALL" install
 assert_exit 0
 assert_symlink "$CWD_INSTALL/.cursor/commands/demo" "github.com/acme/skills"
 assert_symlink "$CWD_INSTALL/.claude/commands/demo" "github.com/acme/skills"
