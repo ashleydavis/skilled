@@ -509,7 +509,7 @@ assert_not_exists "$STORE/github.com/acme/skl-config"
 assert_dir_exists "$STORE/github.com/acme/skills"
 assert_symlink "$CWD_INIT/.cursor/skills/demo" "github.com/acme/skills"
 assert_symlink "$CWD_INIT/.claude/commands/demo" "github.com/acme/skills"
-assert_symlink "$CWD_INIT/.cursor/skills/cmd" "github.com/acme/cmds"
+assert_symlink "$CWD_INIT/.cursor/commands/cmd" "github.com/acme/cmds"
 assert_symlink "$CWD_INIT/.claude/commands/cmd" "github.com/acme/cmds"
 
 scenario "13. init -g --from writes global YAML from an SSH spec"
@@ -560,20 +560,20 @@ assert_symlink "$CWD_ADD/.claude/commands/demo" "github.com/acme/skills"
 assert_not_symlink_path "$CWD_ADD/.cursor/commands/demo"
 assert_not_symlink_path "$CWD_ADD/.claude/skills/demo"
 
-scenario "16. add acme/cmds --ns cmd links Cursor skills and Claude commands (nested plan/create.md)"
+scenario "16. add acme/cmds --ns cmd links Cursor commands and Claude commands (nested plan/create.md)"
 run_cli_in "$CWD_ADD" add acme/cmds --ns cmd
 assert_exit 0
-assert_symlink "$CWD_ADD/.cursor/skills/cmd" "github.com/acme/cmds"
+assert_symlink "$CWD_ADD/.cursor/commands/cmd" "github.com/acme/cmds"
 assert_symlink "$CWD_ADD/.claude/commands/cmd" "github.com/acme/cmds"
-assert_file_exists "$CWD_ADD/.cursor/skills/cmd/plan/create.md"
-assert_not_symlink_path "$CWD_ADD/.cursor/commands/cmd"
+assert_file_exists "$CWD_ADD/.cursor/commands/cmd/plan/create.md"
+assert_not_symlink_path "$CWD_ADD/.cursor/skills/cmd"
 
 scenario "17. add acme/both --ns both links skills and commands for Cursor and Claude"
 run_cli_in "$CWD_ADD" add acme/both --ns both
 assert_exit 0
 assert_symlink "$CWD_ADD/.cursor/skills/both" "github.com/acme/both"
 assert_symlink "$CWD_ADD/.claude/skills/both" "github.com/acme/both"
-assert_not_symlink_path "$CWD_ADD/.cursor/commands/both"
+assert_symlink "$CWD_ADD/.cursor/commands/both" "github.com/acme/both"
 assert_symlink "$CWD_ADD/.claude/commands/both" "github.com/acme/both"
 
 scenario "18. add acme/empty --ns empty fails and does not write YAML"
@@ -627,7 +627,7 @@ run_cli_in "$CWD_INSTALL" init --from acme/skl-config:teams/platform.yaml
 assert_exit 0
 assert_symlink "$CWD_INSTALL/.cursor/skills/demo" "github.com/acme/skills"
 assert_symlink "$CWD_INSTALL/.claude/commands/demo" "github.com/acme/skills"
-assert_symlink "$CWD_INSTALL/.cursor/skills/cmd" "github.com/acme/cmds"
+assert_symlink "$CWD_INSTALL/.cursor/commands/cmd" "github.com/acme/cmds"
 assert_symlink "$CWD_INSTALL/.claude/commands/cmd" "github.com/acme/cmds"
 run_cli_in "$CWD_INSTALL" install
 assert_exit 0
@@ -746,7 +746,7 @@ assert_dir_exists "$STORE/github.com/acme/skills"
 scenario "27. remove cmds matches remaining acme/cmds by repo name"
 run_cli_in "$CWD_ADD" remove cmds
 assert_exit 0
-assert_not_exists "$CWD_ADD/.cursor/skills/cmd"
+assert_not_exists "$CWD_ADD/.cursor/commands/cmd"
 assert_file_lacks "$CWD_ADD/skl.yaml" "acme/cmds"
 
 scenario "28. skl -g remove acme/skills unlinks global dirs; project links stay"

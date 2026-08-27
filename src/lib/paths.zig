@@ -38,8 +38,7 @@ pub const Scope = struct {
     cursor_skills: []const u8,
 
     //
-    // Legacy Cursor command dir (`.cursor/commands`). Linker no longer creates links here;
-    // unlink still clears leftover namespace symlinks from older skl versions.
+    // Where this scope's Cursor command namespace symlinks live.
     //
     cursor_commands: []const u8,
 

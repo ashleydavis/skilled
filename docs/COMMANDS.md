@@ -16,9 +16,9 @@
 | `skl docs [package]` | Print package details and open the GitHub Pages guess. |
 
 Scope is project by default. `-g` / `--global` selects the global YAML and the
-global Cursor/Claude roots (`~/.cursor/skills`, `~/.claude/skills`,
-`~/.claude/commands`). Cursor command files are linked under `~/.cursor/skills`.
-Project roots are the same paths under the current working directory.
+global Cursor/Claude roots (`~/.cursor/skills`, `~/.cursor/commands`,
+`~/.claude/skills`, `~/.claude/commands`). Project roots are the same paths
+under the current working directory.
 
 `add <repo>` requires `--ns <namespace>`. In a TTY it can prompt; with
 `--non-interactive` / `-n` (or `SKL_NONINTERACTIVE=1`, or a non-TTY stdin) it

@@ -25,13 +25,11 @@ Logical ids use a colon (`ns:name`). On disk the namespace is a directory
   (`commands/plan/create.md` → `plan/create`).
 
 A package is valid when at least one of `skills/` or `commands/` exists as a
-directory. An empty tree is still linked. Cursor links both trees under
-`skills/<ns>` (that is where Cursor loads user workflows). Claude keeps
+directory. An empty tree is still linked. Cursor links `skills/<ns>` → store
+`skills/` and `commands/<ns>` → store `commands/`. Claude keeps
 `skills/<ns>` and `commands/<ns>`. A package with `skills/` and no `commands/`
 is Cursor `skills/<ns>` and Claude `commands/<ns>`, both pointing at the store
-`skills/` tree. When both trees exist, Cursor `skills/<ns>` points at store
-`skills/` so the two trees do not share one namespace path; Claude still gets
-both.
+`skills/` tree.
 
 Description for a package is the first paragraph of `README.md` / `readme.md`.
 Description for a skill or command is YAML frontmatter `description` when it is
@@ -43,8 +41,7 @@ a single-line scalar, otherwise the first paragraph of the body.
 
 **Global:** `~/.config/skilled/skl.yaml`, or `$XDG_CONFIG_HOME/skilled/skl.yaml`
 when `XDG_CONFIG_HOME` is set. Links under `~/.cursor` and `~/.claude`. For
-namespace `ns`, Cursor uses `skills/ns`; Claude uses `skills/ns` and
-`commands/ns`.
+namespace `ns`, each agent uses `skills/ns` and `commands/ns`.
 
 ```yaml
 packages:
