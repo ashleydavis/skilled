@@ -101,7 +101,7 @@ test "add clones, appends YAML, and links" {
     });
     try testing.expect(skilled.files.fileExists(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ dest, "skills/hello/SKILL.md" })));
 
-    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "demo" });
     const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }

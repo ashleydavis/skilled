@@ -1,9 +1,10 @@
 //
 // Namespace symlinks from a store clone into Cursor and Claude skill and command directories.
 //
-// One symlink per package tree (`skills/ns` → store/skills, `commands/ns` → store/commands), never
-// a copy, never a write under skills-cursor. Agent parents `.cursor` / `.claude` are real
-// directories so a later namespace cannot fold those trees into the store.
+// One symlink per package tree (`skills/ns` → store/skills, `commands/ns` → store/commands), except
+// a skills-only package is linked as `commands/ns` → store/skills. Never a copy, never a write
+// under skills-cursor. Agent parents `.cursor` / `.claude` are real directories so a later
+// namespace cannot fold those trees into the store.
 //
 
 const std = @import("std");
@@ -36,9 +37,10 @@ const Failure = failure.Failure;
 //
 // Symlinks one package's skills/ and commands/ trees into every agent root in scope.
 //
-// Missing store trees are skipped (a skills-only package gets no commands/ns). Existing links that
-// already point at the store dest are left alone. A real file, or a symlink to somewhere else, is
-// an error rather than `--adopt`.
+// A skills-only package is linked as commands (`commands/ns` → store/skills) so Claude can see
+// those files as slash commands. A package with both trees, or commands only, is linked as-is.
+// Existing links that already point at the store dest are left alone. A real file, or a symlink
+// to somewhere else, is an error rather than `--adopt`.
 //
 pub fn linkPackage(
     io: std.Io,
@@ -49,6 +51,13 @@ pub fn linkPackage(
     fail: *Failure,
 ) failure.Error!void {
     try remote.validateName(namespace, "namespace", fail);
+    const skills_dir = try files.joinPath(allocator, &.{ store_dir, "skills" });
+    const commands_dir = try files.joinPath(allocator, &.{ store_dir, "commands" });
+    if (isDirectory(io, skills_dir, true) and !isDirectory(io, commands_dir, true)) {
+        try linkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands, fail);
+        try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands, fail);
+        return;
+    }
     try linkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_skills, fail);
     try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills, fail);
     try linkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands, fail);
@@ -58,8 +67,9 @@ pub fn linkPackage(
 //
 // Removes skills/ns and commands/ns when they are symlinks to this package's store trees.
 //
-// Missing links are a no-op. A real file or a symlink that points elsewhere is left alone. The
-// store clone is never deleted: another scope may still use it.
+// Also removes commands/ns when it points at store/skills (the skills-only remap). Missing links
+// are a no-op. A real file or a symlink that points elsewhere is left alone. The store clone is
+// never deleted: another scope may still use it.
 //
 pub fn unlinkPackage(
     io: std.Io,
@@ -74,6 +84,8 @@ pub fn unlinkPackage(
     try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills, fail);
     try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands, fail);
     try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.claude_commands, fail);
+    try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands, fail);
+    try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands, fail);
 }
 
 //

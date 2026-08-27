@@ -422,11 +422,19 @@ for flag in --help -h help; do
     assert_output_contains "version"
 done
 
-scenario "2. --version, -V, and version print 0.0.1"
+scenario "2. --version, -V, and version print the same version"
+run_cli_in "$CWD_FLAGS" --version
+assert_exit 0
+VERSION="$(tr -d '[:space:]' < "$OUTPUT_FILE")"
+if [ -z "$VERSION" ]; then
+    fail "expected --version to print a version"
+else
+    pass "version is \"$VERSION\""
+fi
 for flag in --version -V version; do
     run_cli_in "$CWD_FLAGS" "$flag"
     assert_exit 0
-    assert_output_contains "0.0.1"
+    assert_output_contains "$VERSION"
 done
 
 scenario "3. skl with no args prints help and exits 0"
@@ -499,8 +507,8 @@ assert_file_contains "$CWD_INIT/skl.yaml" "acme/cmds"
 assert_file_contains "$CWD_INIT/skl.yaml" "namespace: cmd"
 assert_not_exists "$STORE/github.com/acme/skl-config"
 assert_not_exists "$STORE/github.com/acme/skills"
-assert_not_exists "$CWD_INIT/.cursor/skills/demo"
-assert_not_exists "$CWD_INIT/.claude/skills/demo"
+assert_not_exists "$CWD_INIT/.cursor/commands/demo"
+assert_not_exists "$CWD_INIT/.claude/commands/demo"
 
 scenario "13. init -g --from writes global YAML from an SSH spec"
 run_cli_in "$CWD_INIT" init -g --from git@github.com:acme/skl-config.git:teams/platform.yaml
@@ -537,7 +545,7 @@ fi
 #
 ####################################################################################################
 
-scenario "15. add acme/skills --ns demo clones, writes YAML, and links skills only"
+scenario "15. add acme/skills --ns demo clones, writes YAML, and links skills as commands"
 run_cli_in "$CWD_ADD" init
 assert_exit 0
 run_cli_in "$CWD_ADD" add acme/skills --ns demo
@@ -546,10 +554,10 @@ assert_dir_exists "$STORE/github.com/acme/skills"
 assert_file_exists "$STORE/github.com/acme/skills/skills/demo/SKILL.md"
 assert_file_contains "$CWD_ADD/skl.yaml" "acme/skills"
 assert_file_contains "$CWD_ADD/skl.yaml" "namespace: demo"
-assert_symlink "$CWD_ADD/.cursor/skills/demo" "github.com/acme/skills"
-assert_symlink "$CWD_ADD/.claude/skills/demo" "github.com/acme/skills"
-assert_not_symlink_path "$CWD_ADD/.cursor/commands/demo"
-assert_not_symlink_path "$CWD_ADD/.claude/commands/demo"
+assert_symlink "$CWD_ADD/.cursor/commands/demo" "github.com/acme/skills"
+assert_symlink "$CWD_ADD/.claude/commands/demo" "github.com/acme/skills"
+assert_not_symlink_path "$CWD_ADD/.cursor/skills/demo"
+assert_not_symlink_path "$CWD_ADD/.claude/skills/demo"
 
 scenario "16. add acme/cmds --ns cmd links commands (nested plan/create.md), no skills link"
 run_cli_in "$CWD_ADD" add acme/cmds --ns cmd
@@ -599,12 +607,12 @@ run_cli_in "$CWD_ADD" -g add acme/skills --ns demo
 assert_exit 0
 assert_file_contains "$GLOBAL_YAML" "acme/skills"
 assert_file_contains "$GLOBAL_YAML" "namespace: demo"
-assert_symlink "$HOME/.cursor/skills/demo" "github.com/acme/skills"
-assert_symlink "$HOME/.claude/skills/demo" "github.com/acme/skills"
-if [ -e "$CWD_ADD/.cursor/skills/demo" ]; then
-    pass "project skills/demo still present"
+assert_symlink "$HOME/.cursor/commands/demo" "github.com/acme/skills"
+assert_symlink "$HOME/.claude/commands/demo" "github.com/acme/skills"
+if [ -e "$CWD_ADD/.cursor/commands/demo" ]; then
+    pass "project commands/demo still present"
 else
-    fail "project skills/demo was removed by -g add"
+    fail "project commands/demo was removed by -g add"
 fi
 
 ####################################################################################################
@@ -616,16 +624,16 @@ fi
 scenario "23. install from --from YAML clones and links; second install is idempotent"
 run_cli_in "$CWD_INSTALL" init --from acme/skl-config:teams/platform.yaml
 assert_exit 0
-assert_not_exists "$CWD_INSTALL/.cursor/skills/demo"
+assert_not_exists "$CWD_INSTALL/.cursor/commands/demo"
 run_cli_in "$CWD_INSTALL" install
 assert_exit 0
-assert_symlink "$CWD_INSTALL/.cursor/skills/demo" "github.com/acme/skills"
-assert_symlink "$CWD_INSTALL/.claude/skills/demo" "github.com/acme/skills"
+assert_symlink "$CWD_INSTALL/.cursor/commands/demo" "github.com/acme/skills"
+assert_symlink "$CWD_INSTALL/.claude/commands/demo" "github.com/acme/skills"
 assert_symlink "$CWD_INSTALL/.cursor/commands/cmd" "github.com/acme/cmds"
 assert_symlink "$CWD_INSTALL/.claude/commands/cmd" "github.com/acme/cmds"
 run_cli_in "$CWD_INSTALL" install
 assert_exit 0
-assert_symlink "$CWD_INSTALL/.cursor/skills/demo" "github.com/acme/skills"
+assert_symlink "$CWD_INSTALL/.cursor/commands/demo" "github.com/acme/skills"
 
 scenario "24. skl i is install"
 run_cli_in "$CWD_INSTALL" i
@@ -634,8 +642,8 @@ assert_exit 0
 scenario "25. skl -g install installs from global YAML into global agent dirs"
 run_cli_in "$CWD_INSTALL" -g install
 assert_exit 0
-assert_symlink "$HOME/.cursor/skills/demo" "github.com/acme/skills"
-assert_symlink "$HOME/.claude/skills/demo" "github.com/acme/skills"
+assert_symlink "$HOME/.cursor/commands/demo" "github.com/acme/skills"
+assert_symlink "$HOME/.claude/commands/demo" "github.com/acme/skills"
 
 ####################################################################################################
 #
@@ -647,7 +655,7 @@ scenario "30. update with HEAD unchanged prints unchanged; links still valid"
 run_cli_in "$CWD_ADD" update
 assert_exit 0
 assert_output_contains "unchanged"
-assert_symlink "$CWD_ADD/.cursor/skills/demo" "github.com/acme/skills"
+assert_symlink "$CWD_ADD/.cursor/commands/demo" "github.com/acme/skills"
 
 scenario "31. update demo after a new commit on the fixture remote"
 OLD_SHA="$(cat "$STORE/github.com/acme/skills/.git/refs/heads/main")"
@@ -664,7 +672,7 @@ else
 fi
 assert_output_contains "$OLD_SHA"
 assert_output_contains "$NEW_SHA"
-assert_symlink "$CWD_ADD/.cursor/skills/demo" "github.com/acme/skills"
+assert_symlink "$CWD_ADD/.cursor/commands/demo" "github.com/acme/skills"
 assert_file_contains "$STORE/github.com/acme/skills/README.md" "extra line"
 
 scenario "32. skl -g update updates packages in the global YAML"
@@ -732,8 +740,8 @@ fi
 scenario "26. remove demo unlinks, drops YAML, leaves the store clone"
 run_cli_in "$CWD_ADD" remove demo
 assert_exit 0
-assert_not_exists "$CWD_ADD/.cursor/skills/demo"
-assert_not_exists "$CWD_ADD/.claude/skills/demo"
+assert_not_exists "$CWD_ADD/.cursor/commands/demo"
+assert_not_exists "$CWD_ADD/.claude/commands/demo"
 assert_file_lacks "$CWD_ADD/skl.yaml" "namespace: demo"
 assert_dir_exists "$STORE/github.com/acme/skills"
 
@@ -746,8 +754,8 @@ assert_file_lacks "$CWD_ADD/skl.yaml" "acme/cmds"
 scenario "28. skl -g remove acme/skills unlinks global dirs; project links stay"
 run_cli_in "$CWD_ADD" -g remove acme/skills
 assert_exit 0
-assert_not_exists "$HOME/.cursor/skills/demo"
-assert_not_exists "$HOME/.claude/skills/demo"
+assert_not_exists "$HOME/.cursor/commands/demo"
+assert_not_exists "$HOME/.claude/commands/demo"
 assert_symlink "$CWD_ADD/.cursor/skills/both" "github.com/acme/both"
 
 scenario "29. remove nosuch exits non-zero"
@@ -795,7 +803,7 @@ fi
 run_cli_in "$CWD_ADD" add acme/skills --ns demo
 assert_exit 0
 assert_dir_exists "$STORE/github.com/acme/skills"
-assert_symlink "$CWD_ADD/.cursor/skills/demo" "github.com/acme/skills"
+assert_symlink "$CWD_ADD/.cursor/commands/demo" "github.com/acme/skills"
 if [ -e "$HOME/.ssh.away" ] || [ -L "$HOME/.ssh.away" ]; then
     mv "$HOME/.ssh.away" "$HOME/.ssh"
 fi
@@ -822,7 +830,7 @@ assert_exit 0
 assert_file_contains "$CWD_ADD_FROM/skl.yaml" "acme/skills"
 assert_file_contains "$CWD_ADD_FROM/skl.yaml" "acme/cmds"
 assert_not_exists "$STORE/github.com/acme/skl-config"
-assert_not_exists "$CWD_ADD_FROM/.cursor/skills/demo"
+assert_not_exists "$CWD_ADD_FROM/.cursor/commands/demo"
 
 scenario "46. add --from keeps an existing extra package and appends demo and cmd"
 printf 'packages:\n  - repo: acme/both\n    namespace: keep\n' >"$CWD_ADD_FROM_KEEP/skl.yaml"

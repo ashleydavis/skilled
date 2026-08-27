@@ -216,8 +216,8 @@ test "linkPackage refuses to clobber a real file" {
     var fixture = try makeFixture(io, allocator, true, false);
     defer fixture.temporary.destroy();
 
-    try files.makeDirPath(io, fixture.project.cursor_skills);
-    const blocking = try nsPath(allocator, fixture.project.cursor_skills, "demo");
+    try files.makeDirPath(io, fixture.project.cursor_commands);
+    const blocking = try nsPath(allocator, fixture.project.cursor_commands, "demo");
     try files.writeFile(io, blocking, "not a link\n");
 
     var fail = failure.Failure.init(allocator);
@@ -240,8 +240,8 @@ test "linkPackage refuses a symlink that points elsewhere" {
 
     const other = try fixture.temporary.join(allocator, "other-skills");
     try files.makeDirPath(io, other);
-    try files.makeDirPath(io, fixture.project.cursor_skills);
-    const blocking = try nsPath(allocator, fixture.project.cursor_skills, "demo");
+    try files.makeDirPath(io, fixture.project.cursor_commands);
+    const blocking = try nsPath(allocator, fixture.project.cursor_commands, "demo");
     try std.Io.Dir.cwd().symLink(io, other, blocking, .{ .is_directory = true });
 
     var fail = failure.Failure.init(allocator);
@@ -285,18 +285,18 @@ test "linkPackage project vs global roots" {
 
     var project_fail = failure.Failure.init(allocator);
     try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &project_fail);
-    try expectMissing(io, try nsPath(allocator, fixture.global.cursor_skills, "demo"));
+    try expectMissing(io, try nsPath(allocator, fixture.global.cursor_commands, "demo"));
 
     var global_fail = failure.Failure.init(allocator);
     try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.global, &global_fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
-    try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_dest);
-    try expectSymlink(io, try nsPath(allocator, fixture.global.cursor_skills, "demo"), skills_dest);
-    try expectSymlink(io, try nsPath(allocator, fixture.global.claude_skills, "demo"), skills_dest);
+    try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_commands, "demo"), skills_dest);
+    try expectSymlink(io, try nsPath(allocator, fixture.global.cursor_commands, "demo"), skills_dest);
+    try expectSymlink(io, try nsPath(allocator, fixture.global.claude_commands, "demo"), skills_dest);
 }
 
-test "linkPackage skills-only does not create commands namespace links" {
+test "linkPackage skills-only links the skills tree as commands" {
     var test_io = files.TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
@@ -311,9 +311,15 @@ test "linkPackage skills-only does not create commands namespace links" {
     var fail = failure.Failure.init(allocator);
     try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
-    try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), try files.joinPath(allocator, &.{ fixture.store_dir, "skills" }));
-    try expectMissing(io, fixture.project.cursor_commands);
+    const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
+    try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_commands, "demo"), skills_dest);
+    try expectSymlink(io, try nsPath(allocator, fixture.project.claude_commands, "demo"), skills_dest);
+    try expectMissing(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"));
+    try expectMissing(io, try nsPath(allocator, fixture.project.claude_skills, "demo"));
+
+    try link.unlinkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
     try expectMissing(io, try nsPath(allocator, fixture.project.cursor_commands, "demo"));
+    try expectMissing(io, try nsPath(allocator, fixture.project.claude_commands, "demo"));
 }
 
 test "linkPackage commands-only does not create skills namespace links" {

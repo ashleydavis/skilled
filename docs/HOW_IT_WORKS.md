@@ -25,7 +25,8 @@ Logical ids use a colon (`ns:name`). On disk the namespace is a directory
   (`commands/plan/create.md` → `plan/create`).
 
 A package is valid when at least one of `skills/` or `commands/` exists as a
-directory. An empty tree is still linked.
+directory. An empty tree is still linked. A package with `skills/` and no
+`commands/` is linked as `commands/<ns>` pointing at the store `skills/` tree.
 
 Description for a package is the first paragraph of `README.md` / `readme.md`.
 Description for a skill or command is YAML frontmatter `description` when it is
