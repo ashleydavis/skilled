@@ -194,6 +194,35 @@ assert_file_contains() {
     fi
 }
 
+# YAML `local:` is the path the native binary stored. Git Bash converts `/c/Users/...`
+# argv to `C:/Users/...` when it launches skl.exe, so a byte match against $LOCAL_PKG fails
+# on Windows. Slash and backslash are the same separator.
+assert_file_contains_path() {
+    local path="$1"
+    local expected="$2"
+    if [ ! -f "$path" ]; then
+        fail "expected $path to contain path \"$expected\""
+    fi
+    local content posix_expected
+    content="$(tr '\\' '/' <"$path")"
+    posix_expected="$(printf '%s' "$expected" | tr '\\' '/')"
+    if printf '%s' "$content" | grep -qF -- "$posix_expected"; then
+        pass "$path contains \"$expected\""
+        return
+    fi
+    local letter third drive_form
+    letter="$(printf '%s' "$posix_expected" | cut -c2)"
+    third="$(printf '%s' "$posix_expected" | cut -c3)"
+    if [ "$third" = "/" ] && printf '%s' "$letter" | grep -q '^[A-Za-z]$'; then
+        drive_form="$(printf '%s' "$letter" | tr '[:lower:]' '[:upper:]'):/${posix_expected#???}"
+        if printf '%s' "$content" | grep -qF -- "$drive_form"; then
+            pass "$path contains \"$drive_form\""
+            return
+        fi
+    fi
+    fail "expected $path to contain \"$expected\""
+}
+
 assert_file_lacks() {
     local path="$1"
     local unexpected="$2"
@@ -927,7 +956,7 @@ scenario "51. update demo --local retargets links and writes absolute local"
 run_cli_in "$CWD_SOURCE" update demo --local "$LOCAL_PKG"
 assert_exit 0
 assert_file_contains "$CWD_SOURCE/skl.yaml" "local:"
-assert_file_contains "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
+assert_file_contains_path "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
 assert_file_lacks "$CWD_SOURCE/skl.yaml" "branch:"
 assert_symlink "$CWD_SOURCE/.cursor/skills/demo" "local-skills"
 run_cli_in "$CWD_SOURCE" list
@@ -945,7 +974,7 @@ scenario "53. add --local for a new namespace writes absolute local"
 run_cli_in "$CWD_SOURCE" add acme/skills --ns work --local "$LOCAL_PKG"
 assert_exit 0
 assert_file_contains "$CWD_SOURCE/skl.yaml" "namespace: work"
-assert_file_contains "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
+assert_file_contains_path "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
 assert_symlink "$CWD_SOURCE/.cursor/skills/work" "local-skills"
 
 scenario "54. add --branch and --local together exits non-zero"
