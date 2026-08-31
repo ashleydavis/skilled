@@ -122,18 +122,24 @@ fn printDetails(
     try shared.line(ctx, "{s} {s}", .{ ctx.style.package(), parsed.repo });
     try shared.line(ctx, "namespace: {s}", .{pkg.namespace});
     try shared.line(ctx, "repo: {s}", .{pkg.repo});
+    if (pkg.branch) |branch| {
+        try shared.line(ctx, "branch: {s}", .{branch});
+    }
+    if (pkg.local) |local_path| {
+        try shared.line(ctx, "local: {s}", .{local_path});
+    }
 
-    const resolved = shared.resolveStore(ctx, pkg.repo) catch |err| switch (err) {
+    const dest = shared.contentDir(ctx, pkg) catch |err| switch (err) {
         error.Failed => null,
         error.OutOfMemory => return error.OutOfMemory,
     };
-    if (resolved) |store| {
-        if (shared.dirExists(ctx.io, store.dest)) {
-            if (try package.readmeDescription(ctx.io, ctx.allocator, store.dest, ctx.fail)) |description| {
+    if (dest) |path| {
+        if (shared.dirExists(ctx.io, path)) {
+            if (try package.readmeDescription(ctx.io, ctx.allocator, path, ctx.fail)) |description| {
                 try shared.line(ctx, "{s}", .{description});
             }
             var scan_fail = skilled.failure.Failure.init(ctx.allocator);
-            if (package.scan(ctx.io, ctx.allocator, store.dest, &scan_fail)) |items| {
+            if (package.scan(ctx.io, ctx.allocator, path, &scan_fail)) |items| {
                 for (items) |item| {
                     try shared.line(ctx, "  {s}:{s}  {s}", .{ pkg.namespace, item.name, item.description });
                 }

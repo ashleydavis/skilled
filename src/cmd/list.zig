@@ -69,7 +69,7 @@ pub fn buildCommand(ctx: *const Context) *Command {
 }
 
 //
-// One YAML row, plus items when the store clone is present.
+// One YAML row, plus items when the package directory is present.
 //
 fn printPackage(ctx: *const Context, pkg: skilled.config.Package) skilled.failure.Error!void {
     var parse_fail = skilled.failure.Failure.init(ctx.allocator);
@@ -77,27 +77,33 @@ fn printPackage(ctx: *const Context, pkg: skilled.config.Package) skilled.failur
     const name = if (parsed) |remote| remote.repo else pkg.repo;
 
     const title = try shared.paint(ctx.allocator, ctx.style, "1;36", name);
-    try shared.line(ctx, "{s} {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo });
+    if (pkg.local) |local_path| {
+        try shared.line(ctx, "{s} {s}  {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo, local_path });
+    } else if (pkg.branch) |branch| {
+        try shared.line(ctx, "{s} {s}  {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo, branch });
+    } else {
+        try shared.line(ctx, "{s} {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo });
+    }
 
-    const resolved = shared.resolveStore(ctx, pkg.repo) catch |err| switch (err) {
+    const dest = shared.contentDir(ctx, pkg) catch |err| switch (err) {
         error.Failed => {
             try shared.line(ctx, "  not installed", .{});
             return;
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
-    if (!shared.dirExists(ctx.io, resolved.dest)) {
+    if (!shared.dirExists(ctx.io, dest)) {
         try shared.line(ctx, "  not installed", .{});
         return;
     }
 
-    if (try package.readmeDescription(ctx.io, ctx.allocator, resolved.dest, ctx.fail)) |description| {
+    if (try package.readmeDescription(ctx.io, ctx.allocator, dest, ctx.fail)) |description| {
         const dim = try shared.paint(ctx.allocator, ctx.style, "2", description);
         try shared.line(ctx, "  {s}", .{dim});
     }
 
     var scan_fail = skilled.failure.Failure.init(ctx.allocator);
-    const items = package.scan(ctx.io, ctx.allocator, resolved.dest, &scan_fail) catch {
+    const items = package.scan(ctx.io, ctx.allocator, dest, &scan_fail) catch {
         try shared.line(ctx, "  not installed", .{});
         return;
     };

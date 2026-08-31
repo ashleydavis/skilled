@@ -88,9 +88,37 @@ pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) 
 }
 
 //
-// `git@host:owner/repo` or `git@host:owner/repo.git`, clone URL left as the input.
+// `--branch` names: same per-segment rule as validateName, with `/` allowed between segments.
 //
-fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
+// Pub so clone, checkout, and `--branch` share one check: a dash-prefixed name cannot become a git
+// flag, and `feature/foo` is accepted.
+//
+pub fn validateBranch(name: []const u8, fail: *failure.Failure) failure.Error!void {
+    if (name.len == 0) {
+        return fail.set("invalid branch: empty", .{});
+    }
+    if (std.ascii.eqlIgnoreCase(name, "HEAD")) {
+        return fail.set("invalid branch '{s}'", .{name});
+    }
+    if (name[0] == '-') {
+        return fail.set("invalid branch '{s}': must not start with '-'", .{name});
+    }
+    for (name) |c| {
+        if (c == '\\' or c == ':' or c == '<' or c == '>' or c == '"' or c == '|' or c == '?' or c == '*') {
+            return fail.set("invalid branch '{s}'", .{name});
+        }
+    }
+    if (name[0] == '/' or name[name.len - 1] == '/') {
+        return fail.set("invalid branch '{s}'", .{name});
+    }
+    var segments = std.mem.splitScalar(u8, name, '/');
+    while (segments.next()) |segment| {
+        if (segment.len == 0) {
+            return fail.set("invalid branch '{s}'", .{name});
+        }
+        try validateName(segment, "branch", fail);
+    }
+}fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
     const rest = spec["git@".len..];
     const colon = std.mem.indexOfScalar(u8, rest, ':') orelse {
         return fail.set("invalid SSH remote '{s}'; expected git@host:owner/repo", .{spec});

@@ -80,6 +80,19 @@ pub fn joinPath(allocator: std.mem.Allocator, segments: []const []const u8) std.
 }
 
 //
+// Absolute path for a local working tree, resolved against cwd when `path` is relative.
+//
+// Already-absolute paths are copied so the caller can store them in YAML. Relative paths are
+// joined onto cwd; this does not chdir.
+//
+pub fn absolutePath(allocator: std.mem.Allocator, cwd: []const u8, path: []const u8) std.mem.Allocator.Error![]const u8 {
+    if (std.fs.path.isAbsolute(path)) {
+        return allocator.dupe(u8, path);
+    }
+    return joinPath(allocator, &.{ cwd, path });
+}
+
+//
 // True when two paths name the same location on this host.
 //
 // Windows CI failed because readLink returns `\tmp\...` while dest was `/tmp/...\store\skills`.

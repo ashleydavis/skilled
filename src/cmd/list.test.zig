@@ -61,3 +61,46 @@ test "list missing store clone still prints the YAML row" {
     try testing.expect(std.mem.indexOf(u8, out, "not installed") != null);
     try testing.expect(std.mem.indexOf(u8, out, "demo:hello") == null);
 }
+
+test "list of a local row shows items from that tree" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const yaml = try std.fmt.allocPrint(scenario.allocator(),
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    local: {s}
+        \\
+    , .{local});
+    try scenario.writeProjectYaml(yaml);
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try list.run(&ctx, .{}));
+    const out = scenario.printed();
+    try testing.expect(std.mem.indexOf(u8, out, local) != null);
+    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "not installed") == null);
+}
+
+test "list of a branch row lists items from the store" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "feature",
+    }));
+
+    scenario.clear();
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try list.run(&ctx, .{}));
+    const out = scenario.printed();
+    try testing.expect(std.mem.indexOf(u8, out, "feature") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
+}

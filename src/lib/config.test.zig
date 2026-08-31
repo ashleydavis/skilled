@@ -30,6 +30,8 @@ test "parse reads a list of repo and namespace objects" {
     try testing.expectEqual(@as(usize, 2), file.packages.len);
     try testing.expectEqualStrings("owner/repo", file.packages[0].repo);
     try testing.expectEqualStrings("demo", file.packages[0].namespace);
+    try testing.expect(file.packages[0].branch == null);
+    try testing.expect(file.packages[0].local == null);
     try testing.expectEqualStrings("git@github.example.com:acme/skills.git", file.packages[1].repo);
     try testing.expectEqualStrings("pla", file.packages[1].namespace);
 }
@@ -174,4 +176,110 @@ test "readFile reports a missing file" {
     var fail = failure.Failure.init(allocator);
     try testing.expectError(error.Failed, config.readFile(io, allocator, try temporary.join(allocator, "gone.yaml"), &fail));
     try testing.expect(std.mem.indexOf(u8, fail.text(), "no such file") != null);
+}
+
+test "parse reads branch and omits local" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    const file = try config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    branch: feature
+        \\
+    , &fail);
+    try testing.expectEqual(@as(usize, 1), file.packages.len);
+    try testing.expectEqualStrings("feature", file.packages[0].branch.?);
+    try testing.expect(file.packages[0].local == null);
+}
+
+test "parse reads local and omits branch" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    const file = try config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    local: /home/me/src/skills
+        \\
+    , &fail);
+    try testing.expectEqual(@as(usize, 1), file.packages.len);
+    try testing.expect(file.packages[0].branch == null);
+    try testing.expectEqualStrings("/home/me/src/skills", file.packages[0].local.?);
+}
+
+test "stringify then parse round-trips branch and local" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    const original = try config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    branch: feature
+        \\  - repo: acme/cmds
+        \\    namespace: work
+        \\    local: /tmp/cmds
+        \\
+    , &fail);
+    const rendered = try config.stringify(allocator, original);
+    var fail_again = failure.Failure.init(allocator);
+    const round_tripped = try config.parse(allocator, rendered, &fail_again);
+    try testing.expectEqual(@as(usize, 2), round_tripped.packages.len);
+    try testing.expectEqualStrings("feature", round_tripped.packages[0].branch.?);
+    try testing.expect(round_tripped.packages[0].local == null);
+    try testing.expect(round_tripped.packages[1].branch == null);
+    try testing.expectEqualStrings("/tmp/cmds", round_tripped.packages[1].local.?);
+}
+
+test "parse refuses both branch and local on one row" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    try testing.expectError(error.Failed, config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    branch: feature
+        \\    local: /tmp/skills
+        \\
+    , &fail));
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "branch") != null);
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "local") != null);
+}
+
+test "parse refuses empty branch or local" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var fail_branch = failure.Failure.init(allocator);
+    try testing.expectError(error.Failed, config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    branch: ""
+        \\
+    , &fail_branch));
+    try testing.expect(std.mem.indexOf(u8, fail_branch.text(), "branch") != null);
+
+    var fail_local = failure.Failure.init(allocator);
+    try testing.expectError(error.Failed, config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    local: ""
+        \\
+    , &fail_local));
+    try testing.expect(std.mem.indexOf(u8, fail_local.text(), "local") != null);
 }

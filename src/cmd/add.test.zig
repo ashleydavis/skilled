@@ -244,6 +244,116 @@ test "add without config errors with the missing-config message" {
     try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
 }
 
+test "add --branch writes branch in YAML and clone argv includes --branch" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "feature",
+    }));
+
+    const yaml = try scenario.readProjectYaml();
+    try testing.expect(std.mem.indexOf(u8, yaml, "branch: feature") != null);
+    try testing.expect(std.mem.indexOf(u8, yaml, "local:") == null);
+    try testing.expect(cloneArgvHas(scenario, "--branch"));
+}
+
+test "add --local writes absolute local, does not clone, and links that path" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .local = local,
+    }));
+
+    const yaml = try scenario.readProjectYaml();
+    try testing.expect(std.mem.indexOf(u8, yaml, local) != null);
+    try testing.expect(std.mem.indexOf(u8, yaml, "local:") != null);
+    try testing.expect(std.mem.indexOf(u8, yaml, "branch:") == null);
+    try testing.expectEqual(@as(usize, 0), countGit(scenario, "clone"));
+
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try std.Io.Dir.cwd().readLink(scenario.io(), link_path, &buffer);
+    try testing.expect(std.mem.indexOf(u8, buffer[0..n], "local-skills") != null);
+}
+
+test "add --branch and --local together errors and leaves YAML unchanged" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "feature",
+        .local = "/tmp/skills",
+    }));
+    try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
+}
+
+test "add --from with --branch errors" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+        .branch = "feature",
+    }));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--branch") != null);
+    try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
+}
+
+test "add --local without --ns when non-interactive errors --ns" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .local = local }));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--ns") != null);
+    try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
+}
+
+test "add --local of a missing path leaves YAML unchanged" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .local = "/no/such/path",
+    }));
+    try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
+}
+
 //
 // Dest of the first `git clone`, if clone ran.
 //
@@ -275,4 +385,34 @@ fn countNeedle(haystack: []const u8, needle: []const u8) usize {
         rest = rest[index + needle.len ..];
     }
     return count;
+}
+
+//
+// True when any recorded git argv contains token.
+//
+fn cloneArgvHas(scenario: *harness.Scenario, token: []const u8) bool {
+    for (scenario.git.calls.items) |call| {
+        if (call.argv.len < 2 or !std.mem.eql(u8, call.argv[1], "clone")) {
+            continue;
+        }
+        for (call.argv) |arg| {
+            if (std.mem.eql(u8, arg, token)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+//
+// How many recorded argv have this git subcommand.
+//
+fn countGit(scenario: *harness.Scenario, subcommand: []const u8) usize {
+    var n: usize = 0;
+    for (scenario.git.calls.items) |call| {
+        if (call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], subcommand)) {
+            n += 1;
+        }
+    }
+    return n;
 }

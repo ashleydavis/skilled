@@ -92,3 +92,17 @@ test "init --from through Commander writes YAML and installs listed packages" {
     const st = try std.Io.Dir.cwd().statFile(scenario.io(), skills_link, .{ .follow_symlinks = false });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
+
+test "add --help and update --help mention --branch and --local" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const context = scenario.context();
+    const program = main.buildProgram(&context);
+    const add_help = try commander.renderHelp(scenario.allocator(), program.findSubcommand("add").?);
+    try testing.expect(std.mem.indexOf(u8, add_help, "--branch") != null);
+    try testing.expect(std.mem.indexOf(u8, add_help, "--local") != null);
+    const update_help = try commander.renderHelp(scenario.allocator(), program.findSubcommand("update").?);
+    try testing.expect(std.mem.indexOf(u8, update_help, "--branch") != null);
+    try testing.expect(std.mem.indexOf(u8, update_help, "--local") != null);
+}

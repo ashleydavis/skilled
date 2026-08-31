@@ -1,5 +1,5 @@
 //
-// Reading and writing skl.yaml: a list of `{repo, namespace}` packages.
+// Reading and writing skl.yaml: a list of `{repo, namespace}` packages with optional branch/local.
 //
 
 const std = @import("std");
@@ -50,6 +50,20 @@ pub const Package = struct {
     // The directory name under each agent skills/ and commands/ tree.
     //
     namespace: []const u8,
+
+    //
+    // Named remote branch to clone or check out. Null means the remote's default branch.
+    //
+    // Mutually exclusive with `local` in a parsed document so install has one source.
+    //
+    branch: ?[]const u8 = null,
+
+    //
+    // Absolute path of a local working tree that agent links point at instead of the store.
+    //
+    // Null means the store clone. Written absolute so a later install from another cwd still finds it.
+    //
+    local: ?[]const u8 = null,
 };
 
 //
@@ -104,6 +118,12 @@ pub fn stringify(allocator: std.mem.Allocator, file: File) std.mem.Allocator.Err
         var object: value.Object = .empty;
         try object.put(allocator, "repo", value.str(pkg.repo));
         try object.put(allocator, "namespace", value.str(pkg.namespace));
+        if (pkg.branch) |branch| {
+            try object.put(allocator, "branch", value.str(branch));
+        }
+        if (pkg.local) |local| {
+            try object.put(allocator, "local", value.str(local));
+        }
         try packages.append(.{ .object = object });
     }
 
@@ -155,11 +175,16 @@ fn parsePackage(
 
     const repo = try readRequiredString(allocator, raw_package, "repo", fail);
     const namespace = try readRequiredString(allocator, raw_package, "namespace", fail);
+    const branch = try readOptionalString(allocator, raw_package, "branch", fail);
+    const local = try readOptionalString(allocator, raw_package, "local", fail);
+    if (branch != null and local != null) {
+        return fail.set("skl.yaml package cannot have both \"branch\" and \"local\"", .{});
+    }
     if (seen.contains(namespace)) {
         return fail.set("skl.yaml has a duplicate namespace \"{s}\"", .{namespace});
     }
     try seen.put(allocator, namespace, {});
-    return .{ .repo = repo, .namespace = namespace };
+    return .{ .repo = repo, .namespace = namespace, .branch = branch, .local = local };
 }
 
 //
@@ -168,6 +193,25 @@ fn parsePackage(
 fn readRequiredString(allocator: std.mem.Allocator, object: Value, field: []const u8, fail: *Failure) failure.Error![]const u8 {
     const raw = value.get(object, field);
     switch (raw orelse Value.null) {
+        .string => |text| {
+            if (text.len > 0) {
+                return text;
+            }
+        },
+        else => {},
+    }
+    return fail.set("skl.yaml package field \"{s}\" must be a non-empty string, got {s}", .{
+        field, try value.describe(allocator, raw),
+    });
+}
+
+//
+// Optional string field: absent or YAML null is unset; empty or a non-string is an error.
+//
+fn readOptionalString(allocator: std.mem.Allocator, object: Value, field: []const u8, fail: *Failure) failure.Error!?[]const u8 {
+    const raw = value.get(object, field) orelse return null;
+    switch (raw) {
+        .null => return null,
         .string => |text| {
             if (text.len > 0) {
                 return text;

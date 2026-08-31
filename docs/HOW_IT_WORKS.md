@@ -25,11 +25,12 @@ Logical ids use a colon (`ns:name`). On disk the namespace is a directory
   (`commands/plan/create.md` → `plan/create`).
 
 A package is valid when at least one of `skills/` or `commands/` exists as a
-directory. An empty tree is still linked. Cursor links `skills/<ns>` → store
-`skills/` and `commands/<ns>` → store `commands/`. Claude keeps
+directory. An empty tree is still linked. Cursor links `skills/<ns>` → package
+`skills/` and `commands/<ns>` → package `commands/`. Claude keeps
 `skills/<ns>` and `commands/<ns>`. A package with `skills/` and no `commands/`
-is Cursor `skills/<ns>` and Claude `commands/<ns>`, both pointing at the store
-`skills/` tree.
+is Cursor `skills/<ns>` and Claude `commands/<ns>`, both pointing at the package
+`skills/` tree. The package directory is the store clone, or a `local:`
+working tree when that field is set.
 
 Description for a package is the first paragraph of `README.md` / `readme.md`.
 Description for a skill or command is YAML frontmatter `description` when it is
@@ -47,12 +48,28 @@ namespace `ns`, each agent uses `skills/ns` and `commands/ns`.
 packages:
   - repo: acme/skills
     namespace: demo
-  - repo: git@github.example.com:acme/cmds.git
-    namespace: cmd
+  - repo: acme/skills
+    namespace: feature
+    branch: feature
+  - repo: acme/skills
+    namespace: work
+    local: /home/me/src/skills
 ```
 
 `repo` is `owner/repo` (cloned as `git@github.com:owner/repo.git`) or a full SSH
-URL.
+URL. `repo` and `namespace` are required. `branch` and `local` are optional;
+omit a field when it is unset. A row may have `branch` or `local`, not both.
+
+The store path is always `~/.skilled/store/<host>/<owner>/<repo>/`. `local`
+does not replace that path; it is the directory agent symlinks point at.
+`skl add --local` and `skl update --local` store an absolute path (relative
+`--local` is resolved against the current working directory).
+
+`skl install` (and `init --from` after writing YAML) uses those fields: a
+`branch:` row is cloned with `--branch` when the store dest is missing, or
+checked out onto that branch when the dest already exists. A `local:` row is
+not cloned; the path is scanned and linked (an error if it is missing or not a
+valid package).
 
 Namespaces are unique per config file.
 
@@ -75,6 +92,8 @@ Remotes are SSH:
 
 Host, owner, repo, and namespace must be non-empty, not `.` or `..`, and match
 `[A-Za-z0-9._-]+` per segment (no `/`, `\`, `:`, or Windows-illegal `<>"|?*`).
+`--branch` names use the same rule per `/`-separated segment (`feature/foo`
+is allowed).
 
 ## Windows
 

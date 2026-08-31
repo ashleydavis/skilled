@@ -1,5 +1,5 @@
 //
-// Git on PATH, spawned by argv array, for clone, show, fetch, and HEAD in the store.
+// Git on PATH, spawned by argv array, for clone, show, fetch, checkout, and HEAD in the store.
 //
 // Never a shell: every invocation is `std.process.run` with an argv array and an explicit
 // environment map. Tests inject a GitRunner so clone and fetch never touch the network.
@@ -16,6 +16,11 @@ const failure = @import("failure.zig");
 // Parent-directory creation before clone, and the byte ceiling on captured stdout.
 //
 const files = @import("files.zig");
+
+//
+// Branch names for `--branch` clone/checkout, so a dash-prefixed name cannot become a git flag.
+//
+const remote = @import("remote.zig");
 
 //
 // Alias so signatures read as Failure rather than failure.Failure.
@@ -112,10 +117,11 @@ pub fn customRunner(ctx: *anyopaque, runFn: RunFn) GitRunner {
 }
 
 //
-// `git clone -- <url> <dest>`, creating dest's parent directories first.
+// `git clone [--branch <branch>] -- <url> <dest>`, creating dest's parent directories first.
 //
 // `--` keeps a URL that starts with a dash from being parsed as a flag. Dest is the store path
-// the caller already joined (`store/host/owner/repo`); this does not parse remotes.
+// the caller already joined (`store/host/owner/repo`); this does not parse remotes. `branch` is
+// the named remote branch, or null for the remote's default.
 //
 pub fn clone(
     io: std.Io,
@@ -124,11 +130,19 @@ pub fn clone(
     runner: GitRunner,
     url: []const u8,
     dest: []const u8,
+    branch: ?[]const u8,
     fail: *Failure,
 ) failure.Error!void {
     files.makeParentDir(io, dest) catch |err| {
         return fail.set("cannot create {s}: {s}", .{ dest, files.describeError(err) });
     };
+    if (branch) |name| {
+        try remote.validateBranch(name, fail);
+        const argv = [_][]const u8{ "git", "clone", "--branch", name, "--", url, dest };
+        const result = try invoke(runner, io, allocator, environ, &argv, null, fail);
+        try expectSuccess(result, "git clone", fail);
+        return;
+    }
     const argv = [_][]const u8{ "git", "clone", "--", url, dest };
     const result = try invoke(runner, io, allocator, environ, &argv, null, fail);
     try expectSuccess(result, "git clone", fail);
@@ -175,19 +189,7 @@ pub fn fetchUpdate(
     dest: []const u8,
     fail: *Failure,
 ) failure.Error!void {
-    const head_argv = [_][]const u8{ "git", "rev-parse", "--abbrev-ref", "HEAD" };
-    const head = try invoke(runner, io, allocator, environ, &head_argv, dest, fail);
-    try expectSuccess(head, "git rev-parse --abbrev-ref HEAD", fail);
-    if (std.mem.eql(u8, trim(head.stdout), "HEAD")) {
-        return fail.set("repository has a detached HEAD; cannot update", .{});
-    }
-
-    const status_argv = [_][]const u8{ "git", "status", "--porcelain" };
-    const status = try invoke(runner, io, allocator, environ, &status_argv, dest, fail);
-    try expectSuccess(status, "git status --porcelain", fail);
-    if (trim(status.stdout).len != 0) {
-        return fail.set("working tree is dirty; cannot update", .{});
-    }
+    try refuseDetachedOrDirty(io, allocator, environ, runner, dest, fail);
 
     const upstream_argv = [_][]const u8{ "git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}" };
     const upstream = try invoke(runner, io, allocator, environ, &upstream_argv, dest, fail);
@@ -207,6 +209,60 @@ pub fn fetchUpdate(
             return fail.set("cannot fast-forward: diverged from upstream", .{});
         }
         return fail.set("cannot fast-forward: diverged from upstream: {s}", .{stderr});
+    }
+}
+
+//
+// Fetch, then check dest out onto `origin/<branch>` with tracking, so later fetchUpdate has upstream.
+//
+// Detached or dirty trees are refused with the same wording as fetchUpdate. A missing remote
+// branch is git's non-zero exit, mapped to a Failure.
+//
+pub fn checkoutBranch(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ: *const std.process.Environ.Map,
+    runner: GitRunner,
+    dest: []const u8,
+    branch: []const u8,
+    fail: *Failure,
+) failure.Error!void {
+    try remote.validateBranch(branch, fail);
+    try refuseDetachedOrDirty(io, allocator, environ, runner, dest, fail);
+
+    const fetch_argv = [_][]const u8{ "git", "fetch" };
+    const fetched = try invoke(runner, io, allocator, environ, &fetch_argv, dest, fail);
+    try expectSuccess(fetched, "git fetch", fail);
+
+    const start_point = try std.fmt.allocPrint(allocator, "origin/{s}", .{branch});
+    const checkout_argv = [_][]const u8{ "git", "checkout", "--track", "-B", branch, start_point };
+    const checked = try invoke(runner, io, allocator, environ, &checkout_argv, dest, fail);
+    try expectSuccess(checked, "git checkout", fail);
+}
+
+//
+// Detached HEAD or a dirty working tree, worded the way fetchUpdate already used so callers share one phrase.
+//
+fn refuseDetachedOrDirty(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ: *const std.process.Environ.Map,
+    runner: GitRunner,
+    dest: []const u8,
+    fail: *Failure,
+) failure.Error!void {
+    const head_argv = [_][]const u8{ "git", "rev-parse", "--abbrev-ref", "HEAD" };
+    const head = try invoke(runner, io, allocator, environ, &head_argv, dest, fail);
+    try expectSuccess(head, "git rev-parse --abbrev-ref HEAD", fail);
+    if (std.mem.eql(u8, trim(head.stdout), "HEAD")) {
+        return fail.set("repository has a detached HEAD; cannot update", .{});
+    }
+
+    const status_argv = [_][]const u8{ "git", "status", "--porcelain" };
+    const status = try invoke(runner, io, allocator, environ, &status_argv, dest, fail);
+    try expectSuccess(status, "git status --porcelain", fail);
+    if (trim(status.stdout).len != 0) {
+        return fail.set("working tree is dirty; cannot update", .{});
     }
 }
 

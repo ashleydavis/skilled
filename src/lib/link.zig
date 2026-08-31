@@ -232,7 +232,10 @@ fn placeSymlink(io: std.Io, dest: []const u8, link_path: []const u8, fail: *Fail
     if (files.samePath(buffer[0..n], dest)) {
         return;
     }
-    return fail.set("{s} already points at {s}, not {s}", .{ link_path, buffer[0..n], dest });
+    try removeSymlink(io, link_path, fail);
+    std.Io.Dir.cwd().symLink(io, dest, link_path, .{ .is_directory = true }) catch |create_err| {
+        return mapSymlinkError(create_err, link_path, fail);
+    };
 }
 
 //

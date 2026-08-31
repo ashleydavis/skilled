@@ -153,3 +153,44 @@ test "docs without config errors" {
     try testing.expectError(error.Failed, docs.run(&ctx, .{ .query = "acme/skills" }));
     try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
 }
+
+test "docs of a local row prints local and items from that tree" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const yaml = try std.fmt.allocPrint(scenario.allocator(),
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    local: {s}
+        \\
+    , .{local});
+    try scenario.writeProjectYaml(yaml);
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
+    const out = scenario.printed();
+    try testing.expect(std.mem.indexOf(u8, out, "local:") != null);
+    try testing.expect(std.mem.indexOf(u8, out, local) != null);
+    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
+}
+
+test "docs of a branch row prints branch" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "feature",
+    }));
+
+    scenario.clear();
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "branch: feature") != null);
+}

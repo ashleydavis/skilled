@@ -56,12 +56,12 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const file = try shared.requireConfig(ctx, scope.config_path);
     const matched = try shared.requireOneMatch(ctx.allocator, file.packages, args.query, ctx.fail);
 
-    const resolved = shared.resolveStore(ctx, matched.pkg.repo) catch |err| switch (err) {
+    const dest = shared.contentDir(ctx, matched.pkg) catch |err| switch (err) {
         error.Failed => null,
         error.OutOfMemory => return error.OutOfMemory,
     };
-    if (resolved) |store| {
-        try link.unlinkPackage(ctx.io, ctx.allocator, store.dest, matched.pkg.namespace, scope, ctx.fail);
+    if (dest) |path| {
+        try link.unlinkPackage(ctx.io, ctx.allocator, path, matched.pkg.namespace, scope, ctx.fail);
     }
 
     const remaining = try dropIndex(ctx.allocator, file.packages, matched.index);

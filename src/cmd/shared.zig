@@ -146,11 +146,15 @@ pub fn resolveStore(ctx: *const Context, spec: []const u8) skilled.failure.Error
 
 //
 // Clones into the store when dest is missing. An existing dest is reused (global and project share
-// the store). Progress is drawn only for an actual clone.
+// the store). When `branch` is set and dest already exists, the clone is checked out onto that
+// branch. Progress is drawn only for an actual clone.
 //
-pub fn ensureCloned(ctx: *const Context, spec: []const u8, spinner: *progress.Progress) skilled.failure.Error!Resolved {
+pub fn ensureCloned(ctx: *const Context, spec: []const u8, branch: ?[]const u8, spinner: *progress.Progress) skilled.failure.Error!Resolved {
     const resolved = try resolveStore(ctx, spec);
     if (dirExists(ctx.io, resolved.dest)) {
+        if (branch) |name| {
+            try git.checkoutBranch(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, name, ctx.fail);
+        }
         return resolved;
     }
     spinner.cloning(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ resolved.parsed.owner, resolved.parsed.repo }));
@@ -161,6 +165,7 @@ pub fn ensureCloned(ctx: *const Context, spec: []const u8, spinner: *progress.Pr
         ctx.git,
         resolved.parsed.clone_url,
         resolved.dest,
+        branch,
         ctx.fail,
     ) catch |err| {
         spinner.finish();
@@ -168,6 +173,42 @@ pub fn ensureCloned(ctx: *const Context, spec: []const u8, spinner: *progress.Pr
     };
     spinner.finish();
     return resolved;
+}
+
+//
+// Directory whose skills/ and commands/ trees are linked: a `local:` path, else the store clone.
+//
+pub fn contentDir(ctx: *const Context, pkg: config.Package) skilled.failure.Error![]const u8 {
+    if (pkg.local) |local| {
+        return files.absolutePath(ctx.allocator, ctx.cwd, local);
+    }
+    const resolved = try resolveStore(ctx, pkg.repo);
+    return resolved.dest;
+}
+
+//
+// Absolute path of a local working tree that is a git repo and a valid package.
+//
+// Empty is refused. Relative paths are resolved against ctx.cwd. `.git` may be a directory or a
+// gitfile (a regular file); a missing `.git` is not a repo.
+//
+pub fn resolveLocal(ctx: *const Context, path: []const u8) skilled.failure.Error![]const u8 {
+    if (path.len == 0) {
+        return ctx.fail.set("--local path is empty", .{});
+    }
+    const abs = try files.absolutePath(ctx.allocator, ctx.cwd, path);
+    if (!dirExists(ctx.io, abs)) {
+        return ctx.fail.set("local path {s} is not a directory", .{abs});
+    }
+    const git_dir = try files.joinPath(ctx.allocator, &.{ abs, ".git" });
+    const git_st = std.Io.Dir.cwd().statFile(ctx.io, git_dir, .{ .follow_symlinks = true }) catch {
+        return ctx.fail.set("local path {s} is not a git repository", .{abs});
+    };
+    if (git_st.kind != .directory and git_st.kind != .file) {
+        return ctx.fail.set("local path {s} is not a git repository", .{abs});
+    }
+    _ = try package.scan(ctx.io, ctx.allocator, abs, ctx.fail);
+    return abs;
 }
 
 //
@@ -201,7 +242,15 @@ fn installOne(
     pkg: config.Package,
     spinner: *progress.Progress,
 ) skilled.failure.Error!void {
-    const resolved = try ensureCloned(ctx, pkg.repo, spinner);
+    if (pkg.local) |local_path| {
+        const dest = try resolveLocal(ctx, local_path);
+        spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ pkg.namespace, pkg.repo }));
+        try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
+        spinner.finish();
+        try line(ctx, "{s} {s}", .{ ctx.style.check(), pkg.repo });
+        return;
+    }
+    const resolved = try ensureCloned(ctx, pkg.repo, pkg.branch, spinner);
     _ = try package.scan(ctx.io, ctx.allocator, resolved.dest, ctx.fail);
     spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ pkg.namespace, resolved.parsed.repo }));
     try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
@@ -440,4 +489,12 @@ fn nonEmpty(value: ?[]const u8) ?[]const u8 {
         return null;
     }
     return slice;
+}
+
+test {
+    //
+    // The tests live in their own file so a change to them is never mistaken for a change
+    // to the code. Nothing else imports that file, so naming it here is what runs it.
+    //
+    _ = @import("shared.test.zig");
 }

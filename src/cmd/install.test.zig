@@ -94,6 +94,78 @@ test "init then install of empty YAML succeeds" {
     try testing.expectEqual(@as(u8, 0), try install.run(&ctx, .{}));
 }
 
+test "install of a branch row clones with --branch" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    try scenario.writeProjectYaml(
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    branch: feature
+        \\
+    );
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try install.run(&ctx, .{}));
+    var found = false;
+    for (scenario.git.calls.items) |call| {
+        if (call.argv.len < 2 or !std.mem.eql(u8, call.argv[1], "clone")) {
+            continue;
+        }
+        for (call.argv) |arg| {
+            if (std.mem.eql(u8, arg, "--branch")) {
+                found = true;
+            }
+        }
+    }
+    try testing.expect(found);
+}
+
+test "install of a local row links that path and does not clone" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const yaml = try std.fmt.allocPrint(scenario.allocator(),
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\    local: {s}
+        \\
+    , .{local});
+    try scenario.writeProjectYaml(yaml);
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try install.run(&ctx, .{}));
+    try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
+
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try expectSymlink(scenario.io(), link_path);
+}
+
+test "install missing local path keeps earlier packages" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    try scenario.writeProjectYaml(
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\  - repo: acme/cmds
+        \\    namespace: gone
+        \\    local: /no/such/local/pkg
+        \\
+    );
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, install.run(&ctx, .{}));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "acme/cmds") != null);
+
+    const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try expectSymlink(scenario.io(), skills_link);
+}
+
 //
 // Asserts path exists as a symlink.
 //

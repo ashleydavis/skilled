@@ -118,3 +118,25 @@ test "remove without config errors" {
     try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "acme/skills" }));
     try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
 }
+
+test "remove of a local package unlinks the namespace and drops YAML" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .local = local,
+    }));
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
+
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false }));
+}

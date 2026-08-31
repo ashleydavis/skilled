@@ -87,6 +87,9 @@ const HELP_EXAMPLES =
     \\Examples:
     \\  skl init
     \\  skl add owner/repo --ns demo
+    \\  skl add owner/repo --ns demo --branch feature
+    \\  skl update demo --local /path/to/checkout
+    \\  skl update demo --branch main
     \\  skl install
     \\  skl list
     \\

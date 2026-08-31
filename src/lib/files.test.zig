@@ -6,6 +6,26 @@ const std = @import("std");
 const files = @import("files.zig");
 const testing = std.testing;
 
+test "absolutePath returns an already-absolute path unchanged" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const abs = if (std.fs.path.sep == '/') "/tmp/skills" else "C:\\tmp\\skills";
+    try testing.expect(std.fs.path.isAbsolute(abs));
+    try testing.expectEqualStrings(abs, try files.absolutePath(allocator, "/home/me", abs));
+}
+
+test "absolutePath joins a relative path onto cwd" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const cwd = try files.joinPath(allocator, &.{ "/", "home", "me" });
+    const joined = try files.absolutePath(allocator, cwd, "src/skills");
+    try testing.expectEqualStrings(try files.joinPath(allocator, &.{ cwd, "src/skills" }), joined);
+}
+
 //
 // Windows CI failed when dest used `/` and readLink used `\`. SamePath is the comparison that fix uses.
 //

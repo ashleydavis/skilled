@@ -55,7 +55,7 @@ pub const paths = @import("paths.zig");
 pub const remote = @import("remote.zig");
 
 //
-// skl.yaml: a list of `{repo, namespace}` packages, read and written as YAML.
+// skl.yaml: a list of `{repo, namespace}` packages with optional `branch` and `local`.
 //
 pub const config = @import("config.zig");
 
@@ -70,7 +70,7 @@ pub const frontmatter = @import("frontmatter.zig");
 pub const package = @import("package.zig");
 
 //
-// Clone, show, fetch, and HEAD in the git store, via argv-array spawns.
+// Clone, show, fetch, checkout, and HEAD in the git store, via argv-array spawns.
 //
 pub const git = @import("git.zig");
 

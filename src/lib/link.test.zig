@@ -169,6 +169,30 @@ test "linkPackage is idempotent when the symlink already points at the store" {
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_commands, "demo"), commands_dest);
 }
 
+test "linkPackage retargets from dest A to dest B" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var fixture = try makeFixture(io, allocator, true, false);
+    defer fixture.temporary.destroy();
+
+    const store_b = try fixture.temporary.join(allocator, "store-b");
+    try files.makeDirPath(io, store_b);
+    try fixture.temporary.write("store-b/skills/hello/SKILL.md", "Other skill.\n");
+
+    var fail = failure.Failure.init(allocator);
+    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    try link.linkPackage(io, allocator, store_b, "demo", fixture.project, &fail);
+
+    const skills_b = try files.joinPath(allocator, &.{ store_b, "skills" });
+    try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_b);
+}
+
 test "unlinkPackage removes namespace links and leaves the store clone" {
     var test_io = files.TestIo.init();
     defer test_io.deinit();
@@ -232,7 +256,7 @@ test "linkPackage refuses to clobber a real file" {
     try testing.expectEqualStrings("not a link\n", try files.readFile(io, allocator, blocking));
 }
 
-test "linkPackage refuses a symlink that points elsewhere" {
+test "linkPackage retargets a namespace symlink that pointed elsewhere" {
     var test_io = files.TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
@@ -251,9 +275,10 @@ test "linkPackage refuses a symlink that points elsewhere" {
     try std.Io.Dir.cwd().symLink(io, other, blocking, .{ .is_directory = true });
 
     var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "already points") != null);
-    try expectSymlink(io, blocking, other);
+    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+
+    const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
+    try expectSymlink(io, blocking, skills_dest);
 }
 
 test "unlinkPackage leaves a real file at the namespace path" {

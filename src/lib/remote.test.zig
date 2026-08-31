@@ -151,6 +151,27 @@ test "validateName accepts a namespace that later steps will use under skills/" 
     try remote.validateName("cmd.v2", "namespace", &fail);
 }
 
+test "validateBranch accepts main and feature/foo" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var fail = failure.Failure.init(arena.allocator());
+
+    try remote.validateBranch("main", &fail);
+    try remote.validateBranch("feature/foo", &fail);
+}
+
+test "validateBranch rejects empty, HEAD, dash prefix, dot-dot, empty segments, and colon" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const bad = [_][]const u8{ "", "HEAD", "head", "-n", "..", "a//b", "foo:bar" };
+    for (bad) |name| {
+        var fail = failure.Failure.init(allocator);
+        try testing.expectError(error.Failed, remote.validateBranch(name, &fail));
+    }
+}
+
 test "parse maps an enterprise SSH URL onto store/host/owner/repo" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

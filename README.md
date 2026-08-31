@@ -72,6 +72,41 @@ Then run the demo command:
 
 Add `-g` / `--global` to `init` or `add` to work with your global config under `~/.cursor` and `~/.claude`.
 
+### A branch
+
+Any listed package can be cloned from a named branch:
+
+```sh
+skl add owner/repo --ns demo --branch feature
+```
+
+That clones `feature` and records `branch: feature` in `skl.yaml`. Switch the
+listed package to another branch with `update`:
+
+```sh
+skl update demo --branch main
+```
+
+### A local working tree
+
+Clone the package somewhere you will edit, then point `skl` at that tree:
+
+```sh
+git clone git@github.com:ashleydavis/skl-example-skills.git ~/src/skl-example-skills
+skl add ashleydavis/skl-example-skills --ns demo --local ~/src/skl-example-skills
+```
+
+Agent links go to that path, so edits show up without `update`. The YAML `repo`
+is still the remote identity. Switch an already-listed package the same way,
+then back to a remote branch:
+
+```sh
+skl update demo --local ~/src/skl-example-skills
+skl update demo --branch main
+```
+
+`skl install` has no package argument; it applies each row’s `branch` / `local`.
+
 ## Setup
 
 ### Machine global

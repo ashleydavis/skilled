@@ -156,6 +156,11 @@ pub const FakeGit = struct {
     next_head: []const u8 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 
     //
+    // Branch name `rev-parse --abbrev-ref HEAD` returns. Checkout updates this from argv.
+    //
+    branch: []const u8 = "main",
+
+    //
     // Set when git fetch runs, so a later HEAD reflects next_head.
     //
     fetched: bool = false,
@@ -443,6 +448,30 @@ pub const Scenario = struct {
     pub fn readProjectYaml(self: *Scenario) ![]u8 {
         return files.readFile(self.io(), self.allocator(), try self.projectYaml());
     }
+
+    //
+    // A git working tree with skills/hello under the throwaway root, for `--local` tests.
+    //
+    pub fn writeLocalPackage(self: *Scenario, sub_path: []const u8, description: []const u8) ![]const u8 {
+        const dest = try self.temporary.join(self.allocator(), sub_path);
+        try files.makeDirPath(self.io(), dest);
+        try files.makeDirPath(self.io(), try files.joinPath(self.allocator(), &.{ dest, ".git" }));
+        const skill = try files.joinPath(self.allocator(), &.{ dest, "skills", "hello", "SKILL.md" });
+        try files.makeParentDir(self.io(), skill);
+        const skill_body = try std.fmt.allocPrint(self.allocator(),
+            \\---
+            \\description: {s}
+            \\---
+            \\
+            \\# Hello
+            \\
+        , .{description});
+        try files.writeFile(self.io(), skill, skill_body);
+        const readme = try files.joinPath(self.allocator(), &.{ dest, "README.md" });
+        const readme_body = try std.fmt.allocPrint(self.allocator(), "{s}\n", .{description});
+        try files.writeFile(self.io(), readme, readme_body);
+        return dest;
+    }
 };
 
 //
@@ -470,7 +499,16 @@ fn runGit(
         return fail.set("scripted git: argv too short", .{});
     }
     if (std.mem.eql(u8, argv[1], "clone")) {
+        if (branchFromClone(argv)) |name| {
+            self.branch = try self.allocator.dupe(u8, name);
+        }
         return cloneReply(self, io, allocator, argv, fail);
+    }
+    if (std.mem.eql(u8, argv[1], "checkout")) {
+        if (branchFromCheckout(argv)) |name| {
+            self.branch = try self.allocator.dupe(u8, name);
+        }
+        return ok(allocator);
     }
     if (std.mem.eql(u8, argv[1], "rev-parse")) {
         return revParseReply(self, allocator, argv, fail);
@@ -552,7 +590,7 @@ fn revParseReply(
         };
     }
     if (argvHas(argv, "--abbrev-ref") and argvHas(argv, "HEAD")) {
-        const name: []const u8 = if (self.detached) "HEAD" else "main";
+        const name: []const u8 = if (self.detached) "HEAD" else self.branch;
         return .{
             .stdout = try allocator.dupe(u8, name),
             .stderr = try allocator.dupe(u8, ""),
@@ -567,8 +605,9 @@ fn revParseReply(
                 .exit_code = 1,
             };
         }
+        const upstream = try std.fmt.allocPrint(allocator, "origin/{s}", .{self.branch});
         return .{
-            .stdout = try allocator.dupe(u8, "origin/main"),
+            .stdout = try allocator.dupe(u8, upstream),
             .stderr = try allocator.dupe(u8, ""),
             .exit_code = 0,
         };
@@ -700,6 +739,32 @@ fn copyArgv(allocator: std.mem.Allocator, argv: []const []const u8) ![]const []c
         copy[i] = try allocator.dupe(u8, arg);
     }
     return copy;
+}
+
+//
+// `--branch` value from `git clone --branch <name> -- url dest`, or null when omitted.
+//
+fn branchFromClone(argv: []const []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (i + 1 < argv.len) : (i += 1) {
+        if (std.mem.eql(u8, argv[i], "--branch")) {
+            return argv[i + 1];
+        }
+    }
+    return null;
+}
+
+//
+// Branch after `-B` in `git checkout --track -B <branch> origin/<branch>`.
+//
+fn branchFromCheckout(argv: []const []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (i + 1 < argv.len) : (i += 1) {
+        if (std.mem.eql(u8, argv[i], "-B")) {
+            return argv[i + 1];
+        }
+    }
+    return null;
 }
 
 //

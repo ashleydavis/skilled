@@ -342,6 +342,24 @@ write_remote() {
     printf '%s' "$dest"
 }
 
+write_local_package() {
+    local dest="$1"
+    mkdir -p "$dest"
+    dest="$(cd "$dest" && pwd -P)"
+    fixture_git "$dest" init -b main --quiet
+    mkdir -p "$dest/skills/hello"
+    printf '%s' "---
+description: Local hello
+---
+
+# Hello
+" >"$dest/skills/hello/SKILL.md"
+    printf 'A local working tree.\n' >"$dest/README.md"
+    fixture_git "$dest" add -A
+    fixture_git "$dest" commit --quiet -m "local"
+    printf '%s' "$dest"
+}
+
 REMOTE_SKILLS="$(write_remote "$REMOTES/acme/skills.git" \
     "README.md" "A pack of demo skills.
 " \
@@ -351,6 +369,18 @@ description: Says hello
 
 # Hello
 ")"
+
+fixture_git "$REMOTE_SKILLS" checkout -b dev
+printf 'Skills from the dev branch.\n' >"$REMOTE_SKILLS/README.md"
+printf '%s' "---
+description: Hello from dev
+---
+
+# Hello
+" >"$REMOTE_SKILLS/skills/demo/SKILL.md"
+fixture_git "$REMOTE_SKILLS" add -A
+fixture_git "$REMOTE_SKILLS" commit --quiet -m "dev"
+fixture_git "$REMOTE_SKILLS" checkout main
 
 REMOTE_CMDS="$(write_remote "$REMOTES/acme/cmds.git" \
     "README.md" "A pack of demo commands.
@@ -394,6 +424,8 @@ CWD_ADD_FROM="$(cd "$(mktemp -d)" && pwd -P)"
 CWD_ADD_FROM_KEEP="$(cd "$(mktemp -d)" && pwd -P)"
 CWD_STOW="$(cd "$(mktemp -d)" && pwd -P)"
 CWD_BAD_YAML="$(cd "$(mktemp -d)" && pwd -P)"
+CWD_SOURCE="$(cd "$(mktemp -d)" && pwd -P)"
+LOCAL_PKG="$(write_local_package "$HOME/local-skills")"
 
 STORE="$HOME/.skilled/store"
 GLOBAL_YAML="$HOME/.config/skilled/skl.yaml"
@@ -838,6 +870,127 @@ assert_file_contains "$CWD_ADD_FROM_KEEP/skl.yaml" "namespace: keep"
 assert_file_contains "$CWD_ADD_FROM_KEEP/skl.yaml" "acme/both"
 assert_file_contains "$CWD_ADD_FROM_KEEP/skl.yaml" "namespace: demo"
 assert_file_contains "$CWD_ADD_FROM_KEEP/skl.yaml" "namespace: cmd"
+
+####################################################################################################
+#
+# 48–59: --branch and --local (cwd-source)
+#
+####################################################################################################
+
+SKILLS_STORE="$STORE/github.com/acme/skills"
+
+store_branch() {
+    git -C "$SKILLS_STORE" rev-parse --abbrev-ref HEAD
+}
+
+scenario "48. add --branch dev clones that branch, writes YAML, and links the store"
+run_cli_in "$CWD_SOURCE" init
+assert_exit 0
+run_cli_in "$CWD_SOURCE" add acme/skills --ns demo --branch dev
+assert_exit 0
+assert_file_contains "$CWD_SOURCE/skl.yaml" "acme/skills"
+assert_file_contains "$CWD_SOURCE/skl.yaml" "branch: dev"
+assert_file_lacks "$CWD_SOURCE/skl.yaml" "local:"
+if [ "$(store_branch)" = "dev" ]; then
+    pass "store HEAD is dev"
+else
+    fail "expected store HEAD to be dev, got $(store_branch)"
+fi
+assert_symlink "$CWD_SOURCE/.cursor/skills/demo" "github.com/acme/skills"
+run_cli_in "$CWD_SOURCE" list
+assert_exit 0
+assert_output_contains "Hello from dev"
+
+scenario "49. second install is idempotent and stays on dev"
+run_cli_in "$CWD_SOURCE" install
+assert_exit 0
+if [ "$(store_branch)" = "dev" ]; then
+    pass "store HEAD is still dev"
+else
+    fail "expected store HEAD to stay dev, got $(store_branch)"
+fi
+assert_file_contains "$CWD_SOURCE/skl.yaml" "branch: dev"
+
+scenario "50. update demo --branch main switches the store and YAML"
+run_cli_in "$CWD_SOURCE" update demo --branch main
+assert_exit 0
+assert_file_contains "$CWD_SOURCE/skl.yaml" "branch: main"
+assert_file_lacks "$CWD_SOURCE/skl.yaml" "local:"
+if [ "$(store_branch)" = "main" ]; then
+    pass "store HEAD is main"
+else
+    fail "expected store HEAD to be main, got $(store_branch)"
+fi
+assert_symlink "$CWD_SOURCE/.cursor/skills/demo" "github.com/acme/skills"
+
+scenario "51. update demo --local retargets links and writes absolute local"
+run_cli_in "$CWD_SOURCE" update demo --local "$LOCAL_PKG"
+assert_exit 0
+assert_file_contains "$CWD_SOURCE/skl.yaml" "local:"
+assert_file_contains "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
+assert_file_lacks "$CWD_SOURCE/skl.yaml" "branch:"
+assert_symlink "$CWD_SOURCE/.cursor/skills/demo" "local-skills"
+run_cli_in "$CWD_SOURCE" list
+assert_exit 0
+assert_output_contains "Local hello"
+
+scenario "52. update demo --branch main after local relinks the store"
+run_cli_in "$CWD_SOURCE" update demo --branch main
+assert_exit 0
+assert_file_contains "$CWD_SOURCE/skl.yaml" "branch: main"
+assert_file_lacks "$CWD_SOURCE/skl.yaml" "local:"
+assert_symlink "$CWD_SOURCE/.cursor/skills/demo" "github.com/acme/skills"
+
+scenario "53. add --local for a new namespace writes absolute local"
+run_cli_in "$CWD_SOURCE" add acme/skills --ns work --local "$LOCAL_PKG"
+assert_exit 0
+assert_file_contains "$CWD_SOURCE/skl.yaml" "namespace: work"
+assert_file_contains "$CWD_SOURCE/skl.yaml" "$LOCAL_PKG"
+assert_symlink "$CWD_SOURCE/.cursor/skills/work" "local-skills"
+
+scenario "54. add --branch and --local together exits non-zero"
+cp "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"
+run_cli_in "$CWD_SOURCE" add acme/skills --ns extra --branch dev --local "$LOCAL_PKG"
+assert_failed
+if cmp -s "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"; then
+    pass "cwd-source YAML unchanged when both flags are set"
+else
+    fail "cwd-source YAML changed when both flags are set"
+fi
+
+scenario "55. update --branch with no package query exits non-zero"
+run_cli_in "$CWD_SOURCE" update --branch main
+assert_failed
+assert_output_contains "package"
+
+scenario "56. add --from with --branch exits non-zero"
+run_cli_in "$CWD_SOURCE" add --from acme/skl-config:teams/platform.yaml --branch dev
+assert_failed
+assert_output_contains "--branch"
+
+scenario "57. add --branch nosuchbranch exits non-zero; YAML unchanged"
+cp "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"
+run_cli_in "$CWD_SOURCE" add acme/skills --ns extra --branch nosuchbranch
+assert_failed
+if cmp -s "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"; then
+    pass "cwd-source YAML unchanged on missing branch"
+else
+    fail "cwd-source YAML changed on missing branch"
+fi
+
+scenario "58. update --local of a missing path exits non-zero; YAML unchanged"
+cp "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"
+run_cli_in "$CWD_SOURCE" update demo --local "$HOME/no-such-local-pkg"
+assert_failed
+if cmp -s "$CWD_SOURCE/skl.yaml" "$HOME/cwd-source-yaml.before"; then
+    pass "cwd-source YAML unchanged on missing local path"
+else
+    fail "cwd-source YAML changed on missing local path"
+fi
+
+scenario "59. add of a filesystem path as the repo still exits non-zero"
+run_cli_in "$CWD_SOURCE" add /tmp/some-path --ns x
+assert_failed
 
 echo ""
 echo -e "${BLUE}Throwaway HOME left at $HOME${NC}"

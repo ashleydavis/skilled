@@ -199,6 +199,7 @@ test "clone argv uses -- and the store host/owner/repo dest" {
         scripted.runner(),
         "git@github.com:acme/skills.git",
         dest,
+        null,
         &fail,
     );
 
@@ -215,6 +216,47 @@ test "clone argv uses -- and the store host/owner/repo dest" {
     // Windows CI failed asserting dest ends with `store/github.com/acme/skills`: joinPath uses `\`.
     //
     try testing.expect(std.mem.endsWith(u8, dest, try files.joinPath(allocator, &.{ "store", "github.com", "acme", "skills" })));
+}
+
+test "clone argv includes --branch when a branch is given" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var temporary = try files.TemporaryDir.create(io);
+    defer temporary.destroy();
+
+    var environ = emptyEnviron(allocator);
+    var scripted = Scripted{ .allocator = allocator };
+    try scripted.enqueue(.{});
+
+    const dest = try files.joinPath(allocator, &.{ temporary.path, "store", "github.com", "acme", "skills" });
+    var fail = failure.Failure.init(allocator);
+    try git.clone(
+        io,
+        allocator,
+        &environ,
+        scripted.runner(),
+        "git@github.com:acme/skills.git",
+        dest,
+        "feature",
+        &fail,
+    );
+
+    try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
+    try expectArgv(scripted.calls.items[0], &.{
+        "git",
+        "clone",
+        "--branch",
+        "feature",
+        "--",
+        "git@github.com:acme/skills.git",
+        dest,
+    });
 }
 
 test "showFile argv is git show ref:path" {
@@ -359,6 +401,89 @@ test "fetchUpdate runs git fetch then merge --ff-only @{upstream}" {
     for (scripted.calls.items) |call| {
         try testing.expectEqualStrings(dest, call.cwd.?);
     }
+}
+
+test "checkoutBranch argv is fetch then checkout --track -B origin/branch" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var environ = emptyEnviron(allocator);
+    var scripted = Scripted{ .allocator = allocator };
+    try scripted.enqueue(.{ .stdout = "main\n" });
+    try scripted.enqueue(.{});
+    try scripted.enqueue(.{});
+    try scripted.enqueue(.{});
+
+    const dest = "/tmp/store/github.com/acme/skills";
+    var fail = failure.Failure.init(allocator);
+    try git.checkoutBranch(io, allocator, &environ, scripted.runner(), dest, "feature", &fail);
+
+    try testing.expectEqual(@as(usize, 4), scripted.calls.items.len);
+    try expectArgv(scripted.calls.items[0], &.{ "git", "rev-parse", "--abbrev-ref", "HEAD" });
+    try expectArgv(scripted.calls.items[1], &.{ "git", "status", "--porcelain" });
+    try expectArgv(scripted.calls.items[2], &.{ "git", "fetch" });
+    try expectArgv(scripted.calls.items[3], &.{ "git", "checkout", "--track", "-B", "feature", "origin/feature" });
+    for (scripted.calls.items) |call| {
+        try testing.expectEqualStrings(dest, call.cwd.?);
+    }
+}
+
+test "checkoutBranch refuses a detached HEAD" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var environ = emptyEnviron(allocator);
+    var scripted = Scripted{ .allocator = allocator };
+    try scripted.enqueue(.{ .stdout = "HEAD\n" });
+
+    var fail = failure.Failure.init(allocator);
+    try testing.expectError(error.Failed, git.checkoutBranch(
+        io,
+        allocator,
+        &environ,
+        scripted.runner(),
+        "/tmp/store/github.com/acme/skills",
+        "feature",
+        &fail,
+    ));
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "detached") != null);
+}
+
+test "checkoutBranch refuses a dirty working tree" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var environ = emptyEnviron(allocator);
+    var scripted = Scripted{ .allocator = allocator };
+    try scripted.enqueue(.{ .stdout = "main\n" });
+    try scripted.enqueue(.{ .stdout = " M README.md\n" });
+
+    var fail = failure.Failure.init(allocator);
+    try testing.expectError(error.Failed, git.checkoutBranch(
+        io,
+        allocator,
+        &environ,
+        scripted.runner(),
+        "/tmp/store/github.com/acme/skills",
+        "feature",
+        &fail,
+    ));
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "dirty") != null);
 }
 
 test "headSha argv is git rev-parse HEAD" {

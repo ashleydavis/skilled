@@ -244,7 +244,7 @@ fn fetchText(
     const temp_root = files.dirName(dest);
     defer std.Io.Dir.cwd().deleteTree(io, temp_root) catch {};
 
-    try git.clone(io, allocator, environ, runner, spec.remote.clone_url, dest, fail);
+    try git.clone(io, allocator, environ, runner, spec.remote.clone_url, dest, null, fail);
     return git.showFile(io, allocator, environ, runner, dest, spec.ref, spec.path, fail);
 }
 
