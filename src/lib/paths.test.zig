@@ -158,6 +158,7 @@ test "scopeFromFlag project uses cwd for config and agent roots" {
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_cwd, ".cursor", "commands" }), scope.cursor_commands);
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_cwd, ".claude", "skills" }), scope.claude_skills);
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_cwd, ".claude", "commands" }), scope.claude_commands);
+    try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_cwd, ".skilled", "scratch" }), scope.scratch_dir);
 }
 
 test "scopeFromFlag global uses home for agent roots and XDG for config" {
@@ -172,6 +173,19 @@ test "scopeFromFlag global uses home for agent roots and XDG for config" {
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_home, ".cursor", "commands" }), scope.cursor_commands);
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_home, ".claude", "skills" }), scope.claude_skills);
     try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_home, ".claude", "commands" }), scope.claude_commands);
+    try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_home, ".skilled", "scratch" }), scope.scratch_dir);
+}
+
+test "scopeFromFlag keeps the scratch directory out of XDG_CONFIG_HOME" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const xdg: ?[]const u8 = "/xdg/config";
+    const scope = try paths.scopeFromFlag(allocator, true, fake_home, fake_cwd, xdg);
+    try testing.expect(std.mem.indexOf(u8, scope.config_path, "/xdg/config") != null);
+    try testing.expect(std.mem.indexOf(u8, scope.scratch_dir, "/xdg/config") == null);
+    try testing.expectEqualStrings(try files.joinPath(allocator, &.{ fake_home, ".skilled", "scratch" }), scope.scratch_dir);
 }
 
 test "scopeFromFlag never resolves Cursor skills-cursor" {

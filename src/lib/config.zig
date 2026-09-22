@@ -1,6 +1,9 @@
 //
 // Reading and writing skl.yaml: a list of `{repo, namespace}` packages with optional branch/local.
 //
+// The scratch namespace is refused here rather than in the commands, so a hand-edited file and a
+// fetched `--from` file are both caught before anything is linked.
+//
 
 const std = @import("std");
 
@@ -18,6 +21,11 @@ const files = @import("files.zig");
 // The dynamic YAML value parse produces, and stringify builds back.
 //
 const value = @import("value.zig");
+
+//
+// The namespace the scratch directory owns, which no package may take.
+//
+const scratch = @import("scratch.zig");
 
 //
 // The vendored parser and renderer for the skl.yaml subset.
@@ -38,7 +46,8 @@ const Value = value.Value;
 // One package entry in skl.yaml: where to clone from, and the namespace it links under.
 //
 // A list of these, not a map keyed by name, is what lets the same repo appear twice under
-// different namespaces. Uniqueness is on namespace, checked in parse.
+// different namespaces. Uniqueness is on namespace, checked in parse, which also refuses the
+// namespace the scratch directory owns.
 //
 pub const Package = struct {
     //
@@ -179,6 +188,12 @@ fn parsePackage(
     const local = try readOptionalString(allocator, raw_package, "local", fail);
     if (branch != null and local != null) {
         return fail.set("skl.yaml package cannot have both \"branch\" and \"local\"", .{});
+    }
+    if (scratch.isReserved(namespace)) {
+        return fail.set(
+            "skl.yaml namespace \"{s}\" is reserved for the scratch directory",
+            .{namespace},
+        );
     }
     if (seen.contains(namespace)) {
         return fail.set("skl.yaml has a duplicate namespace \"{s}\"", .{namespace});

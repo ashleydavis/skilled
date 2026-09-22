@@ -1,6 +1,9 @@
 //
 // `skl update`: fast-forward store clones, switch branch/local, and repair missing links.
 //
+// Without `--branch` / `--local` it also creates and links the scratch directory, because that is
+// the same repair.
+//
 // Dirty, detached, diverged, or missing-upstream trees are an error for a remote package. There
 // is no reset. `--branch` / `--local` rewrite that YAML row and retarget namespace links.
 //
@@ -91,6 +94,12 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
         }
         return 0;
     }
+
+    //
+    // Without the source flags this is the "repair missing links" command, so the scratch links are
+    // repaired too. `--branch` and `--local` are about one named package and leave it alone.
+    //
+    try shared.syncScratch(ctx, scope);
 
     if (args.query) |q| {
         const matched = try shared.requireOneMatch(ctx.allocator, file.packages, q, ctx.fail);

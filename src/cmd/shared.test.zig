@@ -156,3 +156,37 @@ fn countArgv(git: *const harness.FakeGit, subcommand: []const u8) usize {
     }
     return n;
 }
+
+test "requireOneMatch refuses the scratch namespace even when packages exist" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const packages = [_]skilled.config.Package{
+        .{ .repo = "acme/skills", .namespace = "demo" },
+    };
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, shared.requireOneMatch(
+        scenario.allocator(),
+        &packages,
+        skilled.scratch.namespace,
+        ctx.fail,
+    ));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "no package matching") == null);
+}
+
+test "syncScratch creates the links and prints the scratch path" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    const scope = try shared.scopeOf(&ctx, false);
+    try shared.syncScratch(&ctx, scope);
+
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{
+        scenario.cwd, ".claude", "skills", skilled.scratch.namespace,
+    });
+    const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), scope.scratch_dir) != null);
+}

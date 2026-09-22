@@ -3,7 +3,8 @@
 //
 // Plain init writes `packages: []` when the file is missing. `--from` fills a missing or empty
 // file from a YAML file in git, then installs those packages. Neither form wipes a list the user
-// already built.
+// already built. Every form creates and links this scope's scratch directory, so a second init
+// repairs a namespace link the user deleted.
 //
 
 const skilled = @import("skilled");
@@ -70,14 +71,17 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     if (!files.fileExists(ctx.io, scope.config_path)) {
         try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = &.{} }, ctx.fail);
         try shared.line(ctx, "wrote {s}", .{scope.config_path});
+        try shared.syncScratch(ctx, scope);
         return 0;
     }
     const file = try config.readFile(ctx.io, ctx.allocator, scope.config_path, ctx.fail);
     if (file.packages.len == 0) {
         try shared.line(ctx, "{s} already exists", .{scope.config_path});
+        try shared.syncScratch(ctx, scope);
         return 0;
     }
     try shared.line(ctx, "{s} already lists packages; not overwritten", .{scope.config_path});
+    try shared.syncScratch(ctx, scope);
     return 0;
 }
 
@@ -105,6 +109,7 @@ fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.
     const fetched = try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec, ctx.fail);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, fetched, ctx.fail);
     try shared.line(ctx, "wrote {s}", .{scope.config_path});
+    try shared.syncScratch(ctx, scope);
     return shared.installAll(ctx, scope, fetched);
 }
 

@@ -18,7 +18,7 @@ This project uses [mise](https://mise.jdx.dev/) to provide Zig and any other too
 
 ## Git in test scripts
 
-Fixture git in `scripts/smoke-tests.sh` may `init` / `add` / `commit` / `config` only inside `mktemp` dirs with `GIT_DIR` and `GIT_WORK_TREE` set to those dirs. After each, abort if `git rev-parse --show-toplevel` is not that throwaway path. Never run those commands against this checkout. `skl` itself is invoked with `GIT_DIR` and `GIT_WORK_TREE` unset. Each smoke run uses its own throwaway `HOME` and fixture repos (`mktemp`), so two `./scripts/smoke-tests.sh` invocations can overlap.
+Fixture git in `scripts/smoke-tests.sh` may `init` / `add` / `commit` / `config` only inside `mktemp` dirs with `GIT_DIR` and `GIT_WORK_TREE` set to those dirs. After each, abort if `git rev-parse --show-toplevel` is not that throwaway path. Never run those commands against this checkout. `skl` itself is invoked with `GIT_DIR` and `GIT_WORK_TREE` unset. Each scenario gets its own throwaway `HOME`, project directory, and copy of the fixture remotes (`mktemp`), so scenarios can run concurrently and two `./scripts/smoke-tests.sh` invocations can overlap.
 
 ## Comments
 
@@ -83,7 +83,7 @@ Unit tests and smoke tests must be safe to run in parallel with themselves: Zig 
 - Never `chdir`. Paths handed to the code under test are absolute (from `TemporaryDir` or a fake join).
 - Never mutate the process environment. Pass a private `Environ.Map`.
 - Never write into this checkout.
-- Smoke tests: each run's `HOME`, fixture remotes, and project cwds come from `mktemp`. No well-known directory.
+- Smoke tests: each scenario's `HOME`, project directory, and fixture remotes come from `mktemp`, and each scenario performs its own setup. A scenario that needs state another scenario left behind is a bug: the driver runs them in lanes that pull from a shared queue (`--jobs`, four by default) and any one of them runs alone with `--only`.
 
 ## Done means
 

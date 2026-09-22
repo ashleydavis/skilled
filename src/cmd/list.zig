@@ -2,7 +2,8 @@
 // `skl list`: print each YAML package and its skills/commands as `ns:name`.
 //
 // A missing store clone still prints the YAML row; the item list is empty with a note that it is
-// not installed.
+// not installed. The scratch directory is printed after the packages, under its own namespace, so
+// what the agents can see is one list rather than two commands.
 //
 
 const std = @import("std");
@@ -20,6 +21,11 @@ const commander = skilled.commander;
 // Package description and skill/command items, when the clone exists.
 //
 const package = skilled.package;
+
+//
+// The scratch namespace, for the section printed after the packages.
+//
+const scratch = skilled.scratch;
 
 //
 // The run values this command was given.
@@ -50,12 +56,14 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
 
     if (file.packages.len == 0) {
         try shared.line(ctx, "no packages", .{});
+        try printScratch(ctx, scope);
         return 0;
     }
 
     for (file.packages) |pkg| {
         try printPackage(ctx, pkg);
     }
+    try printScratch(ctx, scope);
     return 0;
 }
 
@@ -107,8 +115,42 @@ fn printPackage(ctx: *const Context, pkg: skilled.config.Package) skilled.failur
         try shared.line(ctx, "  not installed", .{});
         return;
     };
+    try printItems(ctx, pkg.namespace, items);
+}
+
+//
+// The scratch directory and its items, printed in the same shape as a package.
+//
+// Nothing is printed when the directory is not there: a scope where init and install have not run
+// has no scratch directory to describe, and list is not the command that creates it. A scan that
+// fails (a tree removed by hand) prints the heading only rather than failing the whole listing.
+//
+fn printScratch(ctx: *const Context, scope: skilled.paths.Scope) skilled.failure.Error!void {
+    if (!shared.dirExists(ctx.io, scope.scratch_dir)) {
+        return;
+    }
+
+    const title = try shared.paint(ctx.allocator, ctx.style, "1;36", "scratch");
+    try shared.line(ctx, "{s} {s}  {s}  {s}", .{
+        ctx.style.package(),
+        title,
+        scratch.namespace,
+        scope.scratch_dir,
+    });
+
+    var scan_fail = skilled.failure.Failure.init(ctx.allocator);
+    const items = package.scan(ctx.io, ctx.allocator, scope.scratch_dir, &scan_fail) catch return;
+    try printItems(ctx, scratch.namespace, items);
+}
+
+//
+// The `ns:name` lines under a package or the scratch directory.
+//
+// Shared so a scratch item and a package item cannot drift into two layouts.
+//
+fn printItems(ctx: *const Context, namespace: []const u8, items: []const package.Item) skilled.failure.Error!void {
     for (items) |item| {
-        const id = try std.fmt.allocPrint(ctx.allocator, "{s}:{s}", .{ pkg.namespace, item.name });
+        const id = try std.fmt.allocPrint(ctx.allocator, "{s}:{s}", .{ namespace, item.name });
         if (item.description.len == 0) {
             try shared.line(ctx, "  {s}", .{id});
         } else {

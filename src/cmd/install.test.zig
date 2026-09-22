@@ -173,3 +173,96 @@ fn expectSymlink(io: std.Io, path: []const u8) !void {
     const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
+
+test "install links the scratch directory when the YAML lists no packages" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    try scenario.writeProjectYaml("packages: []\n");
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try install.run(&ctx, .{}));
+
+    for (try scratchLinks(scenario, scenario.cwd)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "scratch") != null);
+}
+
+test "install restores a deleted scratch link and still links the packages" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    try scenario.writeProjectYaml(
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\
+    );
+
+    const first = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try install.run(&first, .{}));
+    const links = try scratchLinks(scenario, scenario.cwd);
+    try removeLink(scenario.io(), links[1]);
+
+    const second = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try install.run(&second, .{}));
+
+    try expectScratchSymlink(scenario.io(), links[1]);
+    const demo_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try expectScratchSymlink(scenario.io(), demo_link);
+}
+
+test "install fails before cloning when a real file holds a scratch link path" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    try scenario.writeProjectYaml(
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: demo
+        \\
+    );
+    const blocked = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".claude", "commands", "loc" });
+    try skilled.files.makeParentDir(scenario.io(), blocked);
+    try skilled.files.writeFile(scenario.io(), blocked, "not a link\n");
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, install.run(&ctx, .{}));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "will not overwrite") != null);
+    try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
+    try testing.expectEqualStrings("not a link\n", try skilled.files.readFile(scenario.io(), scenario.allocator(), blocked));
+}
+
+//
+// The four scratch namespace links under one base directory.
+//
+fn scratchLinks(scenario: *harness.Scenario, base: []const u8) ![4][]const u8 {
+    const allocator = scenario.allocator();
+    const ns = skilled.scratch.namespace;
+    return .{
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "commands", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "commands", ns }),
+    };
+}
+
+//
+// Deletes a namespace symlink. A directory symlink answers IsDir on Windows, so deleteFile alone
+// is not enough.
+//
+fn removeLink(io: std.Io, path: []const u8) !void {
+    std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+        error.IsDir => try std.Io.Dir.cwd().deleteDir(io, path),
+        else => return err,
+    };
+}
+
+//
+// Asserts path exists as a symlink.
+//
+fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}

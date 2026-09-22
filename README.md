@@ -72,6 +72,24 @@ Then run the demo command:
 
 Add `-g` / `--global` to `init` or `add` to work with your global config under `~/.cursor` and `~/.claude`.
 
+### Scratch skills and commands
+
+`skl init` also creates a scratch directory for skills and commands you do not
+want in a package:
+
+```sh
+mkdir -p .skilled/scratch/skills/hello
+$EDITOR .skilled/scratch/skills/hello/SKILL.md
+```
+
+That skill is `loc:hello` in Cursor and Claude with no other command; run it
+with `/loc:hello`. Commands go under `.skilled/scratch/commands/`, and
+`skl list` prints what is there.
+
+With `-g` the directory is `~/.skilled/scratch` and the links are global. `skl
+install` and `skl update` put back a link that was deleted. The namespace `loc`
+is reserved for it.
+
 ### A branch
 
 Any listed package can be cloned from a named branch:
@@ -177,3 +195,13 @@ zig build test
 
 `zig build release` is required before `--binary` so the smoke suite can find
 `bin/<arch>/<os>/skl`.
+
+Smoke scenarios are independent: each one builds its own throwaway `HOME`,
+project directory, and fixture remotes. The suite runs them in four lanes that
+each take the next scenario as soon as they are free. `--jobs N` changes the
+number of lanes and `--only <pattern>` runs a single scenario:
+
+```sh
+./scripts/smoke-tests.sh --jobs 8
+./scripts/smoke-tests.sh --only 31
+```

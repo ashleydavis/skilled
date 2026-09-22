@@ -6,13 +6,13 @@
 |---------|----------------|
 | `skl help` | Same as `--help` / `-h`. |
 | `skl version` | Same as `--version` / `-V`. |
-| `skl init` | Create `skl.yaml` with `packages: []`. `--from` also installs those packages. |
-| `skl install` / `skl i` | Clone/link every package in the active YAML, honoring each row’s `branch` / `local`. |
+| `skl init` | Create `skl.yaml` with `packages: []`, and create and link the scratch directory. `--from` also installs those packages. |
+| `skl install` / `skl i` | Clone/link every package in the active YAML, honoring each row’s `branch` / `local`. Creates and links the scratch directory first. |
 | `skl add <repo>` | Clone, scan, append YAML, and link. Requires `--ns`. `--branch` clones that branch; `--local` links a working tree instead of cloning. |
 | `skl add --from <spec>` | Append packages from a YAML file in git into the existing `skl.yaml`. |
 | `skl remove <query>` | Unlink the namespace and drop that YAML entry. Leaves the store clone. |
-| `skl update [repo]` | Fast-forward store clones and repair missing links. `--branch` / `--local` switch a listed package (query required). |
-| `skl list` | Print packages and each skill/command as `ns:name`. |
+| `skl update [repo]` | Fast-forward store clones and repair missing links, the scratch links included. `--branch` / `--local` switch a listed package (query required). |
+| `skl list` | Print packages and each skill/command as `ns:name`, then the scratch directory. |
 | `skl docs [package]` | Print package details and open the GitHub Pages guess. |
 
 Scope is project by default. `-g` / `--global` selects the global YAML and the
@@ -35,8 +35,8 @@ row’s `branch` / `local`.
 `owner/repo`, the repo name, then the namespace. Ambiguous matches error; pass a
 unique `owner/repo` or the namespace.
 
-`update` without `--branch` or `--local` fast-forwards store clones only
-(`git merge --ff-only`). Dirty, detached, diverged, or missing-upstream store
+`update` without `--branch` or `--local` fast-forwards store clones
+(`git merge --ff-only`) and repairs the scratch links. Dirty, detached, diverged, or missing-upstream store
 trees are an error. A row with `local:` is not fetched: links at that path are
 repaired.
 
@@ -48,6 +48,49 @@ Bare `skl` prints help and exits 0.
 
 If there is no `skl.yaml` in the active scope, commands other than `init` exit
 with `no skl.yaml; run skl init`.
+
+## Scratch directory
+
+`./.skilled/scratch` (project) or `~/.skilled/scratch` (`-g`) holds `skills/`
+and `commands/` trees linked into both agents under the reserved namespace
+`loc`:
+
+```
+.cursor/skills/loc    .cursor/commands/loc
+.claude/skills/loc    .claude/commands/loc
+```
+
+`skl init` creates and links them. `skl install`, and `skl update` without
+`--branch` / `--local`, do it again, so a deleted link is restored. Files put
+there need no other command; see [How it works](HOW_IT_WORKS.md) for the naming
+rules.
+
+`skl list` prints the directory after the packages:
+
+```
+# scratch  loc  /home/me/project/.skilled/scratch
+  loc:hello  Says hello
+  loc:plan/create  Create a plan
+```
+
+`loc` is reserved, so a package cannot take those links:
+
+```
+$ skl add acme/skills --ns loc
+namespace "loc" is reserved for the scratch directory
+$ skl list                    # with namespace: loc in skl.yaml
+skl.yaml namespace "loc" is reserved for the scratch directory
+```
+
+`remove` and `update` take a package query, and `loc` is not a package:
+
+```
+$ skl remove loc
+loc is the scratch directory, not a package
+```
+
+The scratch directory is never cloned, fetched, or updated, and `remove` does
+not delete files in it.
 
 ## `--from`
 

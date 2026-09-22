@@ -2,7 +2,8 @@
 // `skl install` / `skl i`: clone missing packages and link every namespace in the active YAML.
 //
 // Idempotent. On package *k* of *N* failing, packages 1..k-1 stay cloned and linked; there is no
-// rollback. The next install continues the rest.
+// rollback. The next install continues the rest. The scratch directory is created and linked
+// first, so this is also the command that repairs it.
 //
 
 const skilled = @import("skilled");
@@ -41,6 +42,11 @@ pub const Args = struct {
 pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const scope = try shared.scopeOf(ctx, args.global);
     const file = try shared.requireConfig(ctx, scope.config_path);
+    //
+    // Before the packages, so a refused scratch link stops the run rather than leaving half the
+    // namespaces linked, and so a config with no packages still gets its scratch directory.
+    //
+    try shared.syncScratch(ctx, scope);
     return shared.installAll(ctx, scope, file);
 }
 

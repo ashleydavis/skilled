@@ -188,7 +188,10 @@ fn ensureAgentRoot(io: std.Io, agent_root: []const u8, fail: *Failure) failure.E
 // Creates path as a real directory, or accepts one that already is. A symlink here is the stow
 // tree-folding hazard and is an error.
 //
-fn ensureRealDirectory(io: std.Io, path: []const u8, fail: *Failure) failure.Error!void {
+// Pub because the scratch module creates `<scratch>/skills` and `<scratch>/commands` with it, so a
+// symlink or a regular file at either path is refused in the same words as an agent root.
+//
+pub fn ensureRealDirectory(io: std.Io, path: []const u8, fail: *Failure) failure.Error!void {
     const st = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => {
             files.makeDirPath(io, path) catch |create_err| {

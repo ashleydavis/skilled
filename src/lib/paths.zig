@@ -1,5 +1,5 @@
 //
-// Home, config, store, and agent directories, resolved the same way on every platform.
+// Home, config, store, scratch, and agent directories, resolved the same way on every platform.
 //
 // Nothing here touches the disk: home and XDG come from a map the caller already has, and the rest
 // is joining those strings. Tests pass a fake map and fake cwd rather than the process environment.
@@ -51,6 +51,14 @@ pub const Scope = struct {
     // Where this scope's Claude command namespace symlinks live.
     //
     claude_commands: []const u8,
+
+    //
+    // This scope's scratch directory, whose skills/ and commands/ trees are linked as `loc`.
+    //
+    // Resolved here with the agent roots so a run cannot create the trees under one base and link
+    // them from another.
+    //
+    scratch_dir: []const u8,
 };
 
 //
@@ -131,8 +139,8 @@ pub fn clonePath(
 //
 // Config path and agent roots for `-g` (home) or the project (cwd).
 //
-// Global still honours `XDG_CONFIG_HOME` for the YAML path; agent roots stay under home or cwd,
-// never under `skills-cursor`.
+// Global still honours `XDG_CONFIG_HOME` for the YAML path; agent roots and the scratch directory
+// stay under home or cwd, never under `skills-cursor`.
 //
 pub fn scopeFromFlag(
     allocator: std.mem.Allocator,
@@ -165,6 +173,7 @@ fn scopeFromBase(
         .cursor_commands = try files.joinPath(allocator, &.{ base, ".cursor", "commands" }),
         .claude_skills = try files.joinPath(allocator, &.{ base, ".claude", "skills" }),
         .claude_commands = try files.joinPath(allocator, &.{ base, ".claude", "commands" }),
+        .scratch_dir = try files.joinPath(allocator, &.{ base, ".skilled", "scratch" }),
     };
 }
 

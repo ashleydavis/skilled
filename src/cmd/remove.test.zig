@@ -140,3 +140,61 @@ test "remove of a local package unlinks the namespace and drops YAML" {
     const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false }));
 }
+
+test "remove of the scratch namespace is refused and the links survive" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "loc" }));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
+
+    for (try scratchLinks(scenario, scenario.cwd)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+}
+
+test "remove of a package leaves the scratch links alone" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "demo" }));
+
+    const demo_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), demo_link, .{ .follow_symlinks = false }));
+    for (try scratchLinks(scenario, scenario.cwd)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+}
+
+//
+// The four scratch namespace links under one base directory.
+//
+fn scratchLinks(scenario: *harness.Scenario, base: []const u8) ![4][]const u8 {
+    const allocator = scenario.allocator();
+    const ns = skilled.scratch.namespace;
+    return .{
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "commands", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "commands", ns }),
+    };
+}
+
+
+//
+// Asserts path exists as a symlink.
+//
+fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}

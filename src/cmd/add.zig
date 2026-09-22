@@ -43,6 +43,11 @@ const package = skilled.package;
 const remote = skilled.remote;
 
 //
+// The reserved namespace check, so a package cannot take the scratch directory's links.
+//
+const scratch = skilled.scratch;
+
+//
 // The run values this command was given.
 //
 const Context = context_mod.Context;
@@ -120,6 +125,13 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
 
     const namespace = try resolveNamespace(ctx, args.namespace);
     try remote.validateName(namespace, "namespace", ctx.fail);
+    //
+    // Before the clone and before the YAML write, so a refused namespace leaves nothing behind.
+    // The interactive prompt returns into this same variable, so it is checked too.
+    //
+    if (scratch.isReserved(namespace)) {
+        return ctx.fail.set("namespace \"{s}\" is reserved for the scratch directory", .{namespace});
+    }
     if (shared.namespaceTaken(file.packages, namespace)) |taken| {
         return ctx.fail.set("namespace \"{s}\" is already used by {s}", .{ namespace, taken.repo });
     }

@@ -416,3 +416,25 @@ fn countGit(scenario: *harness.Scenario, subcommand: []const u8) usize {
     }
     return n;
 }
+
+test "add --ns loc is refused and changes nothing" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    scenario.git.calls.clearRetainingCapacity();
+
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .namespace = "loc" }));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "reserved") != null);
+    try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
+    try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
+
+    const link_path = try skilled.files.joinPath(scenario.allocator(), &.{
+        scenario.cwd, ".cursor", "skills", skilled.scratch.namespace,
+    });
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try std.Io.Dir.cwd().readLink(scenario.io(), link_path, &buffer);
+    try testing.expect(std.mem.indexOf(u8, buffer[0..n], "scratch") != null);
+}

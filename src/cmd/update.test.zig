@@ -196,3 +196,96 @@ test "no-flag update of a local row does not fetch" {
         try testing.expect(!(call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], "fetch")));
     }
 }
+
+test "update with no flags restores a deleted scratch link" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+
+    const links = try scratchLinks(scenario, scenario.cwd);
+    try removeLink(scenario.io(), links[0]);
+
+    scenario.clear();
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{}));
+
+    try expectScratchSymlink(scenario.io(), links[0]);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "scratch") != null);
+}
+
+test "update --branch and --local leave the scratch links to install" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const local = try scenario.writeLocalPackage("local-skills", "Local hello");
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+
+    const links = try scratchLinks(scenario, scenario.cwd);
+    try removeLink(scenario.io(), links[3]);
+
+    const local_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try update.run(&local_ctx, .{ .query = "demo", .local = local }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{ .follow_symlinks = false }));
+
+    const branch_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try update.run(&branch_ctx, .{ .query = "demo", .branch = "main" }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{ .follow_symlinks = false }));
+}
+
+test "update of the scratch namespace names the scratch directory and does not fetch" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const init_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    const add_ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+
+    scenario.git.calls.clearRetainingCapacity();
+    const ctx = scenario.context();
+    try testing.expectError(error.Failed, update.run(&ctx, .{ .query = "loc" }));
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
+    for (scenario.git.calls.items) |call| {
+        try testing.expect(!(call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], "fetch")));
+    }
+}
+
+//
+// The four scratch namespace links under one base directory.
+//
+fn scratchLinks(scenario: *harness.Scenario, base: []const u8) ![4][]const u8 {
+    const allocator = scenario.allocator();
+    const ns = skilled.scratch.namespace;
+    return .{
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "commands", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "commands", ns }),
+    };
+}
+
+//
+// Deletes a namespace symlink. A directory symlink answers IsDir on Windows, so deleteFile alone
+// is not enough.
+//
+fn removeLink(io: std.Io, path: []const u8) !void {
+    std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+        error.IsDir => try std.Io.Dir.cwd().deleteDir(io, path),
+        else => return err,
+    };
+}
+
+//
+// Asserts path exists as a symlink.
+//
+fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}

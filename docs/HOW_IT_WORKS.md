@@ -7,7 +7,7 @@
    as `github.com` are ordinary directory names.
 2. **YAML** — user intent (`skl.yaml` in the active scope).
 3. **Symlinks** — each package namespace under Cursor and Claude skill/command
-   dirs.
+   dirs, plus the scratch directory under the reserved namespace `loc`.
 
 `skl` never writes under `~/.cursor/skills-cursor/` (Cursor-managed). If there
 is no `skl.yaml` in the active scope, commands other than `init` tell you to
@@ -35,6 +35,49 @@ working tree when that field is set.
 Description for a package is the first paragraph of `README.md` / `readme.md`.
 Description for a skill or command is YAML frontmatter `description` when it is
 a single-line scalar, otherwise the first paragraph of the body.
+
+## Scratch directory
+
+A place for a skill or a command you do not want in a package. It holds the
+same `skills/` and `commands/` trees a package has:
+
+```
+.skilled/scratch/
+  skills/
+    hello/SKILL.md
+  commands/
+    plan/create.md
+```
+
+Project scope keeps it at `./.skilled/scratch`; `-g` keeps it at
+`~/.skilled/scratch`, beside the store. `XDG_CONFIG_HOME` moves the global YAML
+but not this directory.
+
+`skl init` creates both trees and links them. `skl install`, and `skl update`
+without `--branch` / `--local`, create and link them again, so a deleted
+directory or a deleted link comes back.
+
+The four links are:
+
+```
+.cursor/skills/loc    → <scratch>/skills
+.cursor/commands/loc  → <scratch>/commands
+.claude/skills/loc    → <scratch>/skills
+.claude/commands/loc  → <scratch>/commands
+```
+
+Both trees always exist, so Claude gets `skills/loc` and `commands/loc`
+directly; the skills-only remap that applies to a package does not apply here.
+
+Items are named by the package rules above and listed as `loc:<name>`
+(`loc:hello`, `loc:plan/create`).
+
+`loc` is reserved. A `skl.yaml` row with `namespace: loc` is a parse error, and
+`skl add --ns loc` is refused. `skl remove loc` and `skl update loc` say `loc`
+is the scratch directory rather than reporting no package.
+
+The scratch directory is never cloned, fetched, or updated, and `skl remove`
+never deletes files in it.
 
 ## Config files
 
@@ -71,7 +114,8 @@ checked out onto that branch when the dest already exists. A `local:` row is
 not cloned; the path is scanned and linked (an error if it is missing or not a
 valid package).
 
-Namespaces are unique per config file.
+Namespaces are unique per config file, and `loc` is reserved for the scratch
+directory.
 
 `skl init --from` creates `skl.yaml` from a YAML file in a git repo when the
 config is missing or still `packages: []`, then clones and links the packages

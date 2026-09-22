@@ -92,6 +92,44 @@ test "parse refuses a duplicate namespace" {
     try testing.expect(std.mem.indexOf(u8, fail.text(), "demo") != null);
 }
 
+test "parse refuses the scratch namespace" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    try testing.expectError(error.Failed, config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/skills
+        \\    namespace: loc
+        \\
+    , &fail));
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "reserved") != null);
+    try testing.expect(std.mem.indexOf(u8, fail.text(), "loc") != null);
+}
+
+test "parse accepts namespaces that only look like the scratch one" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fail = failure.Failure.init(allocator);
+
+    const file = try config.parse(allocator,
+        \\packages:
+        \\  - repo: acme/one
+        \\    namespace: local
+        \\  - repo: acme/two
+        \\    namespace: loc-notes
+        \\  - repo: acme/three
+        \\    namespace: scratch
+        \\
+    , &fail);
+    try testing.expectEqual(@as(usize, 3), file.packages.len);
+    try testing.expectEqualStrings("local", file.packages[0].namespace);
+    try testing.expectEqualStrings("loc-notes", file.packages[1].namespace);
+    try testing.expectEqualStrings("scratch", file.packages[2].namespace);
+}
+
 test "parse refuses a missing packages field" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

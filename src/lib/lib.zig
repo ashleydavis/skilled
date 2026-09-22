@@ -55,7 +55,8 @@ pub const paths = @import("paths.zig");
 pub const remote = @import("remote.zig");
 
 //
-// skl.yaml: a list of `{repo, namespace}` packages with optional `branch` and `local`.
+// skl.yaml: a list of `{repo, namespace}` packages with optional `branch` and `local`, and the
+// namespace reserved for the scratch directory.
 //
 pub const config = @import("config.zig");
 
@@ -83,6 +84,11 @@ pub const from = @import("from.zig");
 // Namespace symlinks from the store into Cursor and Claude skill and command directories.
 //
 pub const link = @import("link.zig");
+
+//
+// The per-scope scratch directory, linked into Cursor and Claude as `loc`.
+//
+pub const scratch = @import("scratch.zig");
 
 //
 // Which build this is.

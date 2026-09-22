@@ -59,6 +59,11 @@ const progress = skilled.progress;
 const remote = skilled.remote;
 
 //
+// The scratch directory: its reserved namespace, and the call that creates and links it.
+//
+const scratch = skilled.scratch;
+
+//
 // Color and icons for painted stdout.
 //
 const term = skilled.term;
@@ -212,6 +217,17 @@ pub fn resolveLocal(ctx: *const Context, path: []const u8) skilled.failure.Error
 }
 
 //
+// Creates this scope's scratch directory and links it as the reserved namespace.
+//
+// The one place that happens, so `init`, `install`, and a no-flag `update` cannot drift on where
+// the directory is or what it is called. The printed line is how a user learns the path.
+//
+pub fn syncScratch(ctx: *const Context, scope: paths.Scope) skilled.failure.Error!void {
+    try scratch.sync(ctx.io, ctx.allocator, scope, ctx.fail);
+    try line(ctx, "{s} scratch {s}", .{ ctx.style.check(), scope.scratch_dir });
+}
+
+//
 // Clones missing packages and links each namespace in `file`.
 //
 // Same work as `skl install`. `init --from` calls this so the developer does not run a second
@@ -331,12 +347,22 @@ pub fn matchPackages(
 //
 // Exactly one match, or an error listing the matches / saying nothing matched.
 //
+// A query naming the scratch namespace is refused with its own wording.
+//
 pub fn requireOneMatch(
     allocator: std.mem.Allocator,
     packages: []const config.Package,
     query: []const u8,
     fail: *Failure,
 ) skilled.failure.Error!Match {
+    //
+    // The scratch namespace can never be a row (config.parse refuses it), so the generic no-match
+    // wording would send a user looking for a package that cannot exist. Answered here rather than
+    // in remove, update, and docs separately.
+    //
+    if (scratch.isReserved(query)) {
+        return fail.set("{s} is the scratch directory, not a package", .{query});
+    }
     const matches = try matchPackages(allocator, packages, query, fail);
     if (matches.len == 0) {
         return fail.set("no package matching '{s}'", .{query});

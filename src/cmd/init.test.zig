@@ -197,3 +197,106 @@ fn pathExists(scenario: *harness.Scenario, path: []const u8) bool {
     _ = std.Io.Dir.cwd().statFile(scenario.io(), path, .{}) catch return false;
     return true;
 }
+
+test "init creates the scratch trees and links them" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
+
+    const scratch_dir = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".skilled", "scratch" });
+    try expectDirectory(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ scratch_dir, "skills" }));
+    try expectDirectory(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ scratch_dir, "commands" }));
+    for (try scratchLinks(scenario, scenario.cwd)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "scratch") != null);
+}
+
+test "init restores a deleted scratch link" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const first = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&first, .{}));
+    const links = try scratchLinks(scenario, scenario.cwd);
+    try removeLink(scenario.io(), links[2]);
+
+    const second = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&second, .{}));
+    try expectScratchSymlink(scenario.io(), links[2]);
+}
+
+test "init -g links the scratch directory under home" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .global = true }));
+
+    try expectDirectory(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{
+        scenario.home, ".skilled", "scratch", "skills",
+    }));
+    for (try scratchLinks(scenario, scenario.home)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+    const project_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "loc" });
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), project_link, .{ .follow_symlinks = false }));
+}
+
+test "init --from links the scratch directory as well as the packages" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    scenario.git.commands_repo = "cmds";
+    const ctx = scenario.context();
+    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+
+    for (try scratchLinks(scenario, scenario.cwd)) |path| {
+        try expectScratchSymlink(scenario.io(), path);
+    }
+    const demo_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
+    try expectScratchSymlink(scenario.io(), demo_link);
+}
+
+//
+// Asserts path exists as a real directory.
+//
+fn expectDirectory(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.directory, st.kind);
+}
+
+//
+// The four scratch namespace links under one base directory.
+//
+fn scratchLinks(scenario: *harness.Scenario, base: []const u8) ![4][]const u8 {
+    const allocator = scenario.allocator();
+    const ns = skilled.scratch.namespace;
+    return .{
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".cursor", "commands", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "skills", ns }),
+        try skilled.files.joinPath(allocator, &.{ base, ".claude", "commands", ns }),
+    };
+}
+
+//
+// Deletes a namespace symlink. A directory symlink answers IsDir on Windows, so deleteFile alone
+// is not enough.
+//
+fn removeLink(io: std.Io, path: []const u8) !void {
+    std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+        error.IsDir => try std.Io.Dir.cwd().deleteDir(io, path),
+        else => return err,
+    };
+}
+
+//
+// Asserts path exists as a symlink.
+//
+fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}
