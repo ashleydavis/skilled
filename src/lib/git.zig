@@ -134,7 +134,7 @@ pub fn clone(
     fail: *Failure,
 ) failure.Error!void {
     files.makeParentDir(io, dest) catch |err| {
-        return fail.set("cannot create {s}: {s}", .{ dest, files.describeError(err) });
+        return fail.set("Cannot create {s}: {s}.", .{ dest, files.describeError(err) });
     };
     if (branch) |name| {
         try remote.validateBranch(name, fail);
@@ -194,7 +194,7 @@ pub fn fetchUpdate(
     const upstream_argv = [_][]const u8{ "git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}" };
     const upstream = try invoke(runner, io, allocator, environ, &upstream_argv, dest, fail);
     if (upstream.exit_code != 0) {
-        return fail.set("no upstream branch; cannot update", .{});
+        return fail.set("No upstream branch; cannot update.", .{});
     }
 
     const fetch_argv = [_][]const u8{ "git", "fetch" };
@@ -206,9 +206,9 @@ pub fn fetchUpdate(
     if (merged.exit_code != 0) {
         const stderr = trim(merged.stderr);
         if (stderr.len == 0) {
-            return fail.set("cannot fast-forward: diverged from upstream", .{});
+            return fail.set("Cannot fast-forward: diverged from upstream.", .{});
         }
-        return fail.set("cannot fast-forward: diverged from upstream: {s}", .{stderr});
+        return fail.set("Cannot fast-forward: diverged from upstream: {s}", .{stderr});
     }
 }
 
@@ -255,14 +255,14 @@ fn refuseDetachedOrDirty(
     const head = try invoke(runner, io, allocator, environ, &head_argv, dest, fail);
     try expectSuccess(head, "git rev-parse --abbrev-ref HEAD", fail);
     if (std.mem.eql(u8, trim(head.stdout), "HEAD")) {
-        return fail.set("repository has a detached HEAD; cannot update", .{});
+        return fail.set("Repository has a detached HEAD; cannot update.", .{});
     }
 
     const status_argv = [_][]const u8{ "git", "status", "--porcelain" };
     const status = try invoke(runner, io, allocator, environ, &status_argv, dest, fail);
     try expectSuccess(status, "git status --porcelain", fail);
     if (trim(status.stdout).len != 0) {
-        return fail.set("working tree is dirty; cannot update", .{});
+        return fail.set("Working tree is dirty; cannot update.", .{});
     }
 }
 
@@ -305,7 +305,7 @@ fn invoke(
         .custom => |custom| custom.runFn(custom.ctx, io, allocator, &child_env, argv, cwd, fail),
     };
     return result catch |err| switch (err) {
-        error.FileNotFound => return fail.set("git is not on PATH; install git to clone and update packages", .{}),
+        error.FileNotFound => return fail.set("Git is not on PATH; install git to clone and update packages.", .{}),
         error.Failed => return error.Failed,
         error.OutOfMemory => return error.OutOfMemory,
     };
@@ -345,7 +345,7 @@ fn runProcess(
     }) catch |err| switch (err) {
         error.FileNotFound => return error.FileNotFound,
         error.OutOfMemory => return error.OutOfMemory,
-        else => return fail.set("git failed to start: {s}", .{@errorName(err)}),
+        else => return fail.set("Git failed to start: {s}.", .{@errorName(err)}),
     };
 
     switch (spawned.term) {
@@ -357,7 +357,7 @@ fn runProcess(
         else => {
             allocator.free(spawned.stdout);
             allocator.free(spawned.stderr);
-            return fail.set("git was killed before it finished", .{});
+            return fail.set("Git was killed before it finished.", .{});
         },
     }
 }
@@ -371,9 +371,9 @@ fn expectSuccess(result: Result, what: []const u8, fail: *Failure) failure.Error
     }
     const stderr = trim(result.stderr);
     if (stderr.len == 0) {
-        return fail.set("{s} failed with exit code {d}", .{ what, result.exit_code });
+        return fail.set("Command {s} failed with exit code {d}.", .{ what, result.exit_code });
     }
-    return fail.set("{s} failed with exit code {d}: {s}", .{ what, result.exit_code, stderr });
+    return fail.set("Command {s} failed with exit code {d}: {s}", .{ what, result.exit_code, stderr });
 }
 
 //

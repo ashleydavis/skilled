@@ -76,7 +76,7 @@ const Failure = skilled.failure.Failure;
 //
 // The message used when the active scope has no skl.yaml. Exact so smoke tests can match it.
 //
-pub const missing_config_message = "no skl.yaml; run skl init";
+pub const missing_config_message = "No skl.yaml here; run skl init.";
 
 //
 // A package plus its index in the YAML list, so remove can drop that one entry.
@@ -97,6 +97,11 @@ pub const Match = struct {
 // Parsed remote plus the store directory it clones into.
 //
 pub const Resolved = struct {
+    //
+    // Whether this run created the clone, as opposed to finding it already in the store.
+    //
+    cloned: bool = false,
+
     //
     // Host, owner, repo, and clone URL after step-6 validation.
     //
@@ -146,7 +151,7 @@ pub fn requireConfig(ctx: *const Context, config_path: []const u8) skilled.failu
 pub fn resolveStore(ctx: *const Context, spec: []const u8) skilled.failure.Error!Resolved {
     const parsed = try remote.parse(ctx.allocator, spec, ctx.fail);
     const dest = try paths.clonePath(ctx.allocator, try storeDir(ctx), parsed.host, parsed.owner, parsed.repo);
-    return .{ .parsed = parsed, .dest = dest };
+    return .{ .parsed = parsed, .dest = dest, .cloned = false };
 }
 
 //
@@ -155,10 +160,11 @@ pub fn resolveStore(ctx: *const Context, spec: []const u8) skilled.failure.Error
 // branch. Progress is drawn only for an actual clone.
 //
 pub fn ensureCloned(ctx: *const Context, spec: []const u8, branch: ?[]const u8, spinner: *progress.Progress) skilled.failure.Error!Resolved {
-    const resolved = try resolveStore(ctx, spec);
+    var resolved = try resolveStore(ctx, spec);
     if (dirExists(ctx.io, resolved.dest)) {
         if (branch) |name| {
             try git.checkoutBranch(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, name, ctx.fail);
+            resolved.cloned = true;
         }
         return resolved;
     }
@@ -177,6 +183,7 @@ pub fn ensureCloned(ctx: *const Context, spec: []const u8, branch: ?[]const u8, 
         return err;
     };
     spinner.finish();
+    resolved.cloned = true;
     return resolved;
 }
 
@@ -199,18 +206,18 @@ pub fn contentDir(ctx: *const Context, pkg: config.Package) skilled.failure.Erro
 //
 pub fn resolveLocal(ctx: *const Context, path: []const u8) skilled.failure.Error![]const u8 {
     if (path.len == 0) {
-        return ctx.fail.set("--local path is empty", .{});
+        return ctx.fail.set("The --local path is empty.", .{});
     }
     const abs = try files.absolutePath(ctx.allocator, ctx.cwd, path);
     if (!dirExists(ctx.io, abs)) {
-        return ctx.fail.set("local path {s} is not a directory", .{abs});
+        return ctx.fail.set("Local path {s} is not a directory.", .{abs});
     }
     const git_dir = try files.joinPath(ctx.allocator, &.{ abs, ".git" });
     const git_st = std.Io.Dir.cwd().statFile(ctx.io, git_dir, .{ .follow_symlinks = true }) catch {
-        return ctx.fail.set("local path {s} is not a git repository", .{abs});
+        return ctx.fail.set("Local path {s} is not a git repository.", .{abs});
     };
     if (git_st.kind != .directory and git_st.kind != .file) {
-        return ctx.fail.set("local path {s} is not a git repository", .{abs});
+        return ctx.fail.set("Local path {s} is not a git repository.", .{abs});
     }
     _ = try package.scan(ctx.io, ctx.allocator, abs, ctx.fail);
     return abs;
@@ -220,11 +227,15 @@ pub fn resolveLocal(ctx: *const Context, path: []const u8) skilled.failure.Error
 // Creates this scope's scratch directory and links it as the reserved namespace.
 //
 // The one place that happens, so `init`, `install`, and a no-flag `update` cannot drift on where
-// the directory is or what it is called. The printed line is how a user learns the path.
+// the directory is or what it is called. The line is printed only when something was created or
+// repaired, so a routine run says nothing about a directory that was already there.
 //
 pub fn syncScratch(ctx: *const Context, scope: paths.Scope) skilled.failure.Error!void {
-    try scratch.sync(ctx.io, ctx.allocator, scope, ctx.fail);
-    try line(ctx, "{s} scratch {s}", .{ ctx.style.check(), scope.scratch_dir });
+    const status = try scratch.sync(ctx.io, ctx.allocator, scope, ctx.fail);
+    if (status == .unchanged) {
+        return;
+    }
+    try line(ctx, "{s} Scratch directory at {s}.", .{ ctx.style.check(), try muted(ctx, scope.scratch_dir) });
 }
 
 //
@@ -243,7 +254,7 @@ pub fn installAll(ctx: *const Context, scope: paths.Scope, file: config.File) sk
         var one_ctx = ctx.*;
         one_ctx.fail = &one_fail;
         installOne(&one_ctx, scope, pkg, &spinner) catch {
-            return ctx.fail.set("install failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
+            return ctx.fail.set("Install failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
         };
     }
     return 0;
@@ -261,17 +272,29 @@ fn installOne(
     if (pkg.local) |local_path| {
         const dest = try resolveLocal(ctx, local_path);
         spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ pkg.namespace, pkg.repo }));
-        try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
+        const linked = try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
         spinner.finish();
-        try line(ctx, "{s} {s}", .{ ctx.style.check(), pkg.repo });
+        if (linked == .changed) {
+            try line(ctx, "{s} Installed {s}.", .{ ctx.style.check(), try identifier(ctx, pkg.repo) });
+        } else {
+            try line(ctx, "  {s} is already installed.", .{try identifier(ctx, pkg.repo)});
+        }
         return;
     }
     const resolved = try ensureCloned(ctx, pkg.repo, pkg.branch, spinner);
     _ = try package.scan(ctx.io, ctx.allocator, resolved.dest, ctx.fail);
     spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ pkg.namespace, resolved.parsed.repo }));
-    try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
+    const linked = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
     spinner.finish();
-    try line(ctx, "{s} {s}", .{ ctx.style.check(), pkg.repo });
+    //
+    // Every package accounts for itself, but only a package that needed work gets the mark: a tick
+    // means something was cloned or relinked, a plain line means it was checked and left alone.
+    //
+    if (resolved.cloned or linked == .changed) {
+        try line(ctx, "{s} Installed {s}.", .{ ctx.style.check(), try identifier(ctx, pkg.repo) });
+        return;
+    }
+    try line(ctx, "  {s} is already installed.", .{try identifier(ctx, pkg.repo)});
 }
 
 //
@@ -285,7 +308,7 @@ pub fn newSpinner(ctx: *const Context) progress.Progress {
 // Writes one line to stdout, or records that output could not be written.
 //
 pub fn line(ctx: *const Context, comptime fmt: []const u8, args: anytype) skilled.failure.Error!void {
-    ctx.stdout.print(fmt ++ "\n", args) catch return ctx.fail.set("cannot write output", .{});
+    ctx.stdout.print(fmt ++ "\n", args) catch return ctx.fail.set("Cannot write output.", .{});
 }
 
 //
@@ -301,9 +324,9 @@ pub fn promptWrite(ctx: *const Context, comptime fmt: []const u8, args: anytype)
 //
 pub fn promptLine(ctx: *const Context) skilled.failure.Error![]const u8 {
     const raw = ctx.stdin.takeDelimiterExclusive('\n') catch |err| switch (err) {
-        error.EndOfStream => return ctx.fail.set("expected input", .{}),
-        error.StreamTooLong => return ctx.fail.set("input is too long", .{}),
-        error.ReadFailed => return ctx.fail.set("cannot read input", .{}),
+        error.EndOfStream => return ctx.fail.set("Expected input.", .{}),
+        error.StreamTooLong => return ctx.fail.set("Input is too long.", .{}),
+        error.ReadFailed => return ctx.fail.set("Cannot read input.", .{}),
     };
     return std.mem.trim(u8, raw, " \t\r");
 }
@@ -361,11 +384,11 @@ pub fn requireOneMatch(
     // in remove, update, and docs separately.
     //
     if (scratch.isReserved(query)) {
-        return fail.set("{s} is the scratch directory, not a package", .{query});
+        return fail.set("{s} is the scratch directory, not a package.", .{query});
     }
     const matches = try matchPackages(allocator, packages, query, fail);
     if (matches.len == 0) {
-        return fail.set("no package matching '{s}'", .{query});
+        return fail.set("No package matching '{s}'.", .{query});
     }
     if (matches.len > 1) {
         var listed: std.ArrayList(u8) = .empty;
@@ -376,7 +399,7 @@ pub fn requireOneMatch(
             try listed.print(allocator, "{s} ({s})", .{ m.pkg.namespace, m.pkg.repo });
         }
         return fail.set(
-            "ambiguous match '{s}' ({s}); pass a unique owner/repo or the namespace",
+            "Ambiguous match '{s}' ({s}); pass a unique owner/repo or the namespace.",
             .{ query, listed.items },
         );
     }
@@ -451,6 +474,39 @@ pub fn openUrl(ctx: *const Context, url: []const u8) skilled.failure.Error!void 
 }
 
 //
+// The first seven characters of a SHA, or the whole thing when it is already shorter.
+//
+// Shared by add and update so one command cannot start abbreviating differently from the other.
+//
+pub fn shortSha(sha: []const u8) []const u8 {
+    if (sha.len <= 7) {
+        return sha;
+    }
+    return sha[0..7];
+}
+
+//
+// A namespace, painted the way every command paints one.
+//
+pub fn namespaceText(ctx: *const Context, text: []const u8) std.mem.Allocator.Error![]const u8 {
+    return paint(ctx.allocator, ctx.style, term.namespace_color, text);
+}
+
+//
+// An identifier — owner/repo, a URL, a branch — painted the way every command paints one.
+//
+pub fn identifier(ctx: *const Context, text: []const u8) std.mem.Allocator.Error![]const u8 {
+    return paint(ctx.allocator, ctx.style, term.identifier_color, text);
+}
+
+//
+// Anything secondary: a path, a SHA, a description.
+//
+pub fn muted(ctx: *const Context, text: []const u8) std.mem.Allocator.Error![]const u8 {
+    return paint(ctx.allocator, ctx.style, term.muted_color, text);
+}
+
+//
 // Wraps text in ANSI when color is on. Returns text unchanged otherwise, so callers can print either.
 //
 pub fn paint(allocator: std.mem.Allocator, style: term.Style, code: []const u8, text: []const u8) std.mem.Allocator.Error![]const u8 {
@@ -492,17 +548,17 @@ fn spawnBrowser(ctx: *const Context, argv: []const []const u8) skilled.failure.E
         .stdout_limit = .limited(files.MAX_FILE_BYTES),
         .stderr_limit = .limited(files.MAX_FILE_BYTES),
     }) catch |err| switch (err) {
-        error.FileNotFound => return ctx.fail.set("browser not found: {s}", .{argv[0]}),
+        error.FileNotFound => return ctx.fail.set("Browser not found: {s}.", .{argv[0]}),
         error.OutOfMemory => return error.OutOfMemory,
-        else => return ctx.fail.set("browser failed to start: {s}", .{@errorName(err)}),
+        else => return ctx.fail.set("Browser failed to start: {s}.", .{@errorName(err)}),
     };
     switch (spawned.term) {
         .exited => |code| {
             if (code != 0) {
-                return ctx.fail.set("browser exited with code {d}", .{code});
+                return ctx.fail.set("Browser exited with code {d}.", .{code});
             }
         },
-        else => return ctx.fail.set("browser was killed before it finished", .{}),
+        else => return ctx.fail.set("Browser was killed before it finished.", .{}),
     }
 }
 

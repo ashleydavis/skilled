@@ -23,6 +23,11 @@
 const std = @import("std");
 
 //
+// Color for help: which parts of the rendered help are painted, and with what.
+//
+const term = @import("term.zig");
+
+//
 // How wide the left column of the help is before a description starts.
 //
 // The help is laid out in two columns with the right one wrapped. The number is what commander's
@@ -218,6 +223,12 @@ pub const Command = struct {
     action_context: ?*const anyopaque = null,
 
     //
+    // Whether help is painted, and with what. Off by default so a command built without a style
+    // renders the same plain text it always did.
+    //
+    help_style: term.Style = .{ .color = false, .icons = false },
+
+    //
     // Extra text printed after the help, such as the examples under the program's own usage.
     //
     help_text_after: []const u8 = "",
@@ -227,14 +238,14 @@ pub const Command = struct {
     //
     version_text: ?[]const u8 = null,
     version_flags: []const u8 = "-V, --version",
-    version_description: []const u8 = "output the version number",
+    version_description: []const u8 = "Output the version number.",
 
     //
     // How the help option is spelled and described. Commander's default is "-h, --help"; the
     // program overrides it to "--help".
     //
     help_flags: []const u8 = "-h, --help",
-    help_description: []const u8 = "display help for command",
+    help_description: []const u8 = "Display help for command.",
 
     //
     // Whether an option after a subcommand's name belongs to that subcommand.
@@ -365,8 +376,17 @@ pub const Command = struct {
     // call can be chained, but nothing ever chains off it: a program adds its subcommands as a list
     // of statements. Returning the parent would only mean a `_ =` on every one of those lines.
     //
+    //
+    // Paints help with this style, and hands it to every subcommand added afterwards.
+    //
+    pub fn style(self: *Command, value: term.Style) *Command {
+        self.help_style = value;
+        return self;
+    }
+
     pub fn addCommand(self: *Command, sub: *Command) void {
         sub.parent = self;
+        sub.help_style = self.help_style;
         self.subcommands.append(self.allocator, sub) catch @panic("out of memory building the command line");
     }
 
@@ -587,7 +607,7 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
             }
 
             const found = current.findOption(word) orelse {
-                return runner.refuse(allocator, "error: unknown option '{s}'", .{word});
+                return runner.refuse(allocator, "Unknown option '{s}'.", .{word});
             };
 
             if (!found.takesValue()) {
@@ -597,7 +617,7 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
 
             at += 1;
             if (at >= argv.len) {
-                return runner.refuse(allocator, "error: option '{s}' argument missing", .{found.flags});
+                return runner.refuse(allocator, "Option '{s}' is missing its argument.", .{found.flags});
             }
             try values.put(allocator, found.name(), argv[at]);
             continue;
@@ -621,7 +641,7 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
                 var target: *const Command = current;
                 if (at + 1 < argv.len and !isOption(argv[at + 1])) {
                     target = current.findSubcommand(argv[at + 1]) orelse {
-                        return runner.refuse(allocator, "error: unknown command '{s}'", .{argv[at + 1]});
+                        return runner.refuse(allocator, "Unknown command '{s}'.", .{argv[at + 1]});
                     };
                 }
                 try writeHelp(runner.out, target, allocator);
@@ -642,13 +662,13 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
             // it an unknown command; otherwise it is one argument too many.
             //
             if (current.subcommands.items.len > 0) {
-                return runner.refuse(allocator, "error: unknown command '{s}'", .{word});
+                return runner.refuse(allocator, "Unknown command '{s}'.", .{word});
             }
-            return runner.refuse(allocator, "error: too many arguments. Expected 0 arguments but got {d}.", .{argv.len - at});
+            return runner.refuse(allocator, "Too many arguments: expected 0 but got {d}.", .{argv.len - at});
         }
 
         if (positionals.items.len > 0 and !isVariadic(current.argument_spec.?.spec)) {
-            return runner.refuse(allocator, "error: too many arguments. Expected 1 argument but got {d}.", .{positionals.items.len + 1});
+            return runner.refuse(allocator, "Too many arguments: expected 1 but got {d}.", .{positionals.items.len + 1});
         }
 
         try positionals.append(allocator, word);
@@ -721,7 +741,10 @@ pub fn renderHelp(allocator: std.mem.Allocator, command: *const Command) std.mem
     // The usage line names what the command actually accepts, so a command with no options does not
     // claim to take any.
     //
-    try out.print(allocator, "Usage: {s}", .{command.command_name});
+    try out.print(allocator, "{s} {s}", .{
+        try painted(allocator, command.help_style, bold, "Usage:"),
+        try painted(allocator, command.help_style, term.identifier_color, command.command_name),
+    });
     if (command.options.items.len > 0 or command.version_text != null) {
         try out.appendSlice(allocator, " [options]");
     }
@@ -741,26 +764,26 @@ pub fn renderHelp(allocator: std.mem.Allocator, command: *const Command) std.mem
     //
     // Options, the version first when there is one, and help last, which is commander's order.
     //
-    try out.appendSlice(allocator, "\nOptions:\n");
+    try out.print(allocator, "\n{s}\n", .{try painted(allocator, command.help_style, bold, "Options:")});
     if (command.version_text != null) {
-        try writeTwoColumn(&out, allocator, command.version_flags, command.version_description);
+        try writeTwoColumn(&out, allocator, command.help_style, command.version_flags, command.version_description);
     }
     for (command.options.items) |candidate| {
         if (candidate.default_value) |default_value| {
             const text = try std.fmt.allocPrint(allocator, "{s} (default: \"{s}\")", .{ candidate.description, default_value });
-            try writeTwoColumn(&out, allocator, candidate.flags, text);
+            try writeTwoColumn(&out, allocator, command.help_style, candidate.flags, text);
         } else {
-            try writeTwoColumn(&out, allocator, candidate.flags, candidate.description);
+            try writeTwoColumn(&out, allocator, command.help_style, candidate.flags, candidate.description);
         }
     }
-    try writeTwoColumn(&out, allocator, command.help_flags, command.help_description);
+    try writeTwoColumn(&out, allocator, command.help_style, command.help_flags, command.help_description);
 
     if (command.subcommands.items.len > 0) {
-        try out.appendSlice(allocator, "\nCommands:\n");
+        try out.print(allocator, "\n{s}\n", .{try painted(allocator, command.help_style, bold, "Commands:")});
         for (command.subcommands.items) |sub| {
-            try writeTwoColumn(&out, allocator, try subcommandTerm(allocator, sub), sub.description_text);
+            try writeTwoColumn(&out, allocator, command.help_style, try subcommandTerm(allocator, sub), sub.description_text);
         }
-        try writeTwoColumn(&out, allocator, "help [command]", "display help for command");
+        try writeTwoColumn(&out, allocator, command.help_style, "help [command]", "Display help for command.");
     }
 
     if (command.help_text_after.len > 0) {
@@ -772,34 +795,60 @@ pub fn renderHelp(allocator: std.mem.Allocator, command: *const Command) std.mem
 }
 
 //
+// Bold, used for the help's section headings.
+//
+const bold = "1";
+
+//
+// Wraps text in an SGR sequence when the style takes color, and returns it untouched when not.
+//
+fn painted(
+    allocator: std.mem.Allocator,
+    style: term.Style,
+    code: []const u8,
+    text: []const u8,
+) std.mem.Allocator.Error![]const u8 {
+    if (!style.color) {
+        return text;
+    }
+    return std.fmt.allocPrint(allocator, "\x1b[{s}m{s}\x1b[0m", .{ code, text });
+}
+
+//
 // How a subcommand is named in its parent's help: its name, its aliases, and what it accepts.
 //
 pub fn subcommandTerm(allocator: std.mem.Allocator, sub: *const Command) std.mem.Allocator.Error![]const u8 {
-    var term: std.ArrayList(u8) = .empty;
+    var label: std.ArrayList(u8) = .empty;
 
-    try term.appendSlice(allocator, sub.command_name);
+    try label.appendSlice(allocator, sub.command_name);
     for (sub.aliases.items) |alias_name| {
-        try term.print(allocator, "|{s}", .{alias_name});
+        try label.print(allocator, "|{s}", .{alias_name});
     }
     if (sub.options.items.len > 0) {
-        try term.appendSlice(allocator, " [options]");
+        try label.appendSlice(allocator, " [options]");
     }
     if (sub.argument_spec) |spec| {
-        try term.print(allocator, " {s}", .{spec.spec});
+        try label.print(allocator, " {s}", .{spec.spec});
     }
 
     //
     // Deliberately not " [command]". A subcommand that has subcommands of its own is still listed
     // by name alone in its parent's help, which is what commander prints, and the two have to match.
     //
-    return term.toOwnedSlice(allocator);
+    return label.toOwnedSlice(allocator);
 }
 
 //
 // Writes one help row: a term on the left, its description wrapped on the right.
 //
-fn writeTwoColumn(out: *std.ArrayList(u8), allocator: std.mem.Allocator, term: []const u8, text: []const u8) std.mem.Allocator.Error!void {
-    try out.print(allocator, "  {s}", .{term});
+fn writeTwoColumn(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    style: term.Style,
+    label: []const u8,
+    text: []const u8,
+) std.mem.Allocator.Error!void {
+    try out.print(allocator, "  {s}", .{try painted(allocator, style, term.identifier_color, label)});
 
     if (text.len == 0) {
         try out.appendSlice(allocator, "\n");
@@ -807,14 +856,15 @@ fn writeTwoColumn(out: *std.ArrayList(u8), allocator: std.mem.Allocator, term: [
     }
 
     //
-    // A term too wide for its column pushes the description onto the next line, which is what
-    // commander does rather than letting the columns run into each other.
+    // A label too wide for its column pushes the description onto the next line, which is what
+    // commander does rather than letting the columns run into each other. Padding is measured on
+    // the unpainted label: an escape sequence takes bytes but no columns.
     //
-    if (term.len > HELP_TERM_WIDTH - 2) {
+    if (label.len > HELP_TERM_WIDTH - 2) {
         try out.appendSlice(allocator, "\n");
         try out.appendNTimes(allocator, ' ', HELP_TERM_WIDTH + 2);
     } else {
-        try out.appendNTimes(allocator, ' ', HELP_TERM_WIDTH - term.len);
+        try out.appendNTimes(allocator, ' ', HELP_TERM_WIDTH - label.len);
     }
 
     try writeWrapped(out, allocator, text, HELP_TERM_WIDTH + 2);

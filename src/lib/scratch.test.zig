@@ -115,7 +115,7 @@ test "scratch ensureTrees creates both trees and the parents above them" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     const commands = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" });
@@ -135,12 +135,12 @@ test "scratch ensureTrees twice leaves the trees and their files alone" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
     const skill_path = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills", "hello", "SKILL.md" });
     try files.makeParentDir(io, skill_path);
     try files.writeFile(io, skill_path, "Hello.\n");
 
-    try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
     try testing.expect(files.fileExists(io, skill_path));
 }
 
@@ -176,7 +176,7 @@ test "scratch sync links both trees into the project agent roots" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     const commands = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" });
@@ -199,7 +199,7 @@ test "scratch sync of a global scope leaves the project roots alone" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.sync(io, allocator, fixture.global, &fail);
+    _ = try scratch.sync(io, allocator, fixture.global, &fail);
 
     const global_links = try linkPaths(allocator, fixture.global);
     const project_links = try linkPaths(allocator, fixture.project);
@@ -221,8 +221,8 @@ test "scratch sync twice is idempotent" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.sync(io, allocator, fixture.project, &fail);
-    try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
 
     const links = try linkPaths(allocator, fixture.project);
     try expectSymlink(io, links[3], try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" }));
@@ -240,12 +240,12 @@ test "scratch sync restores a deleted namespace link" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
     const links = try linkPaths(allocator, fixture.project);
     try removeLink(io, links[2]);
     try testing.expect(missing(io, links[2]));
 
-    try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     try expectSymlink(io, links[2], skills);
@@ -284,11 +284,47 @@ test "scratch sync makes a scratch skill readable through the agent link" {
     defer fixture.temporary.destroy();
     var fail = failure.Failure.init(allocator);
 
-    try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
     const written = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills", "hello", "SKILL.md" });
     try files.makeParentDir(io, written);
     try files.writeFile(io, written, "Scratch hello.\n");
 
     const through_link = try files.joinPath(allocator, &.{ fixture.project.cursor_skills, scratch.namespace, "hello", "SKILL.md" });
     try testing.expectEqualStrings("Scratch hello.\n", try files.readFile(io, allocator, through_link));
+}
+
+test "scratch sync reports a first run as changed and a repeat as unchanged" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var fixture = try makeFixture(io, allocator);
+    defer fixture.temporary.destroy();
+    var fail = failure.Failure.init(allocator);
+
+    try testing.expectEqual(scratch.Status.changed, try scratch.sync(io, allocator, fixture.project, &fail));
+    try testing.expectEqual(scratch.Status.unchanged, try scratch.sync(io, allocator, fixture.project, &fail));
+}
+
+test "scratch sync reports a repaired link as changed" {
+    var test_io = files.TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var fixture = try makeFixture(io, allocator);
+    defer fixture.temporary.destroy();
+    var fail = failure.Failure.init(allocator);
+
+    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    const links = try linkPaths(allocator, fixture.project);
+    try removeLink(io, links[1]);
+
+    try testing.expectEqual(scratch.Status.changed, try scratch.sync(io, allocator, fixture.project, &fail));
+    try testing.expectEqual(scratch.Status.unchanged, try scratch.sync(io, allocator, fixture.project, &fail));
 }

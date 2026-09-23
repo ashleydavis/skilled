@@ -47,7 +47,7 @@ Non-interactive `docs` prints that URL and does not open a browser. Non-interact
 Bare `skl` prints help and exits 0.
 
 If there is no `skl.yaml` in the active scope, commands other than `init` exit
-with `no skl.yaml; run skl init`.
+non-zero and tell you to run `skl init`.
 
 ## Scratch directory
 
@@ -65,29 +65,14 @@ and `commands/` trees linked into both agents under the reserved namespace
 there need no other command; see [How it works](HOW_IT_WORKS.md) for the naming
 rules.
 
-`skl list` prints the directory after the packages:
+`skl list` prints the directory after the packages, with its items named
+`loc:<name>` the same way a package's items are named `ns:name`.
 
-```
-# scratch  loc  /home/me/project/.skilled/scratch
-  loc:hello  Says hello
-  loc:plan/create  Create a plan
-```
+`loc` is reserved, so a package cannot take those links: `skl add --ns loc` is
+refused, and a row with `namespace: loc` in `skl.yaml` is a parse error.
 
-`loc` is reserved, so a package cannot take those links:
-
-```
-$ skl add acme/skills --ns loc
-namespace "loc" is reserved for the scratch directory
-$ skl list                    # with namespace: loc in skl.yaml
-skl.yaml namespace "loc" is reserved for the scratch directory
-```
-
-`remove` and `update` take a package query, and `loc` is not a package:
-
-```
-$ skl remove loc
-loc is the scratch directory, not a package
-```
+`remove` and `update` take a package query, and `loc` is not a package, so
+`skl remove loc` is refused.
 
 The scratch directory is never cloned, fetched, or updated, and `remove` does
 not delete files in it.

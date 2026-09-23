@@ -56,7 +56,7 @@ test "install missing config errors" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, install.run(&ctx, .{}));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "install partial failure keeps earlier packages" {

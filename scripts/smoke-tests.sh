@@ -622,7 +622,7 @@ sc04() {
     scenario_env
     run_cli_in "$CWD" nosuch
     assert_failed
-    assert_output_contains "unknown command"
+    assert_output_contains "Unknown command"
     assert_output_contains "nosuch"
 }
 
@@ -940,7 +940,7 @@ sc30() {
     setup_cli add acme/skills --ns demo
     run_cli_in "$CWD" update
     assert_exit 0
-    assert_output_contains "unchanged"
+    assert_output_contains "is already up to date"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
 }
 
@@ -961,8 +961,8 @@ sc31() {
     else
         pass "store HEAD moved $old_sha -> $new_sha"
     fi
-    assert_output_contains "$old_sha"
-    assert_output_contains "$new_sha"
+    assert_output_contains "${old_sha:0:7}"
+    assert_output_contains "${new_sha:0:7}"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
     assert_file_contains "$STORE/github.com/acme/skills/README.md" "extra line"
 }
@@ -983,9 +983,9 @@ sc33() {
     assert_exit 0
     assert_output_contains "demo"
     assert_output_contains "acme/skills"
-    assert_output_contains "demo:demo"
+    assert_output_contains "demo —"
     assert_output_contains "Says hello"
-    assert_output_contains "cmd:plan/create"
+    assert_output_contains "plan/create"
     assert_output_contains "Create a plan"
     assert_output_contains "A pack of demo skills"
 }
@@ -1026,7 +1026,7 @@ sc36() {
     setup_cli add acme/skills --ns demo
     run_cli_in "$CWD" docs demo --open
     assert_failed
-    assert_output_contains "unknown option"
+    assert_output_contains "Unknown option"
 }
 
 sc37() {
@@ -1348,9 +1348,9 @@ sc63() {
     write_scratch_items
     run_cli_in "$CWD" list
     assert_exit 0
-    assert_output_contains "loc:hello"
+    assert_output_contains "loc —"
     assert_output_contains "Scratch hello"
-    assert_output_contains "loc:plan/create"
+    assert_output_contains "plan/create"
 }
 
 sc64() {
@@ -1500,10 +1500,10 @@ SCENARIOS=(
     "sc27|27. remove cmds matches remaining acme/cmds by repo name"
     "sc28|28. skl -g remove acme/skills unlinks global dirs; project links stay"
     "sc29|29. remove nosuch exits non-zero"
-    "sc30|30. update with HEAD unchanged prints unchanged; links still valid"
+    "sc30|30. update with HEAD unchanged says the package is up to date; links still valid"
     "sc31|31. update demo after a new commit on the fixture remote"
     "sc32|32. skl -g update updates packages in the global YAML"
-    "sc33|33. list prints packages and ns:name items, including nested commands"
+    "sc33|33. list groups each namespace and names its skills and commands"
     "sc34|34. skl -g list lists global packages, not the project file"
     "sc35|35. docs demo -n prints details and does not invoke SKL_BROWSER"
     "sc36|36. docs demo --open is unknown"
@@ -1533,7 +1533,7 @@ SCENARIOS=(
     "sc60|60. skl init creates the scratch trees and links them into both agents"
     "sc61|61. a scratch skill is readable through the Cursor and Claude links"
     "sc62|62. a scratch command is readable through the Cursor and Claude links"
-    "sc63|63. list prints the scratch skill and command as loc items"
+    "sc63|63. list groups the scratch directory under loc with its items"
     "sc64|64. install restores a deleted scratch link"
     "sc65|65. update with no arguments restores a deleted scratch link"
     "sc66|66. a second install is idempotent and keeps the scratch files"

@@ -151,7 +151,7 @@ test "docs without config errors" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, docs.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "docs of a local row prints local and items from that tree" {
@@ -171,7 +171,7 @@ test "docs of a local row prints local and items from that tree" {
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
     const out = scenario.printed();
-    try testing.expect(std.mem.indexOf(u8, out, "local:") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "Local:") != null);
     try testing.expect(std.mem.indexOf(u8, out, local) != null);
     try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
 }
@@ -192,5 +192,5 @@ test "docs of a branch row prints branch" {
     scenario.clear();
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "branch: feature") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "Branch: feature") != null);
 }

@@ -16,11 +16,11 @@ test "reportFailure prints the message and exits non-zero" {
     defer arena.deinit();
 
     var fail = Failure.init(arena.allocator());
-    _ = fail.set("no skl.yaml; run skl init", .{}) catch {};
+    _ = fail.set("No skl.yaml here; run skl init.", .{}) catch {};
 
     var captured = std.Io.Writer.Allocating.init(arena.allocator());
-    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer));
-    try testing.expectEqualStrings("no skl.yaml; run skl init\n", captured.written());
+    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer, .{ .color = false, .icons = false }));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.\n", captured.written());
 }
 
 test "reportFailure says something even when nothing was recorded" {
@@ -29,7 +29,7 @@ test "reportFailure says something even when nothing was recorded" {
 
     var fail = Failure.init(arena.allocator());
     var captured = std.Io.Writer.Allocating.init(arena.allocator());
-    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer));
+    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer, .{ .color = false, .icons = false }));
     try testing.expect(captured.written().len > 1);
 }
 

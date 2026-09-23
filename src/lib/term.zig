@@ -29,6 +29,42 @@ pub const arrow_icon = "→";
 pub const package_icon = "📦";
 
 //
+// The palette, kept here so every command paints the same kind of thing the same way.
+//
+// `namespace` is what a user types in an agent, `identifier` is where files came from, `muted` is
+// anything a reader can skip: a path, a SHA, prose. Values are the SGR parameters `paint` takes,
+// not whole escape sequences, so a caller that already has an allocator can reuse them.
+//
+
+//
+// A namespace: the handle typed in Cursor or Claude.
+//
+pub const namespace_color = "1;33";
+
+//
+// An identifier: owner/repo, a URL, a branch.
+//
+pub const identifier_color = "1;36";
+
+//
+// Anything secondary: paths, SHAs, descriptions.
+//
+pub const muted_color = "2";
+
+//
+// A grouping label inside a listing.
+//
+pub const label_color = "35";
+
+//
+// Raw sequences for the marks above, which are printed without an allocator.
+//
+const green = "\x1b[32m";
+const red = "\x1b[31m";
+const dim = "\x1b[2m";
+const reset = "\x1b[0m";
+
+//
 // Whether color and icons should be written.
 //
 // Icons follow color: they are on only when color is on. Two fields rather than one, so a caller
@@ -46,28 +82,41 @@ pub const Style = struct {
     icons: bool,
 
     //
-    // The mark for a success, or its ASCII stand-in when icons are off.
+    // The mark for a success: green when color is on, and its ASCII stand-in when it is off.
+    //
+    // The escape is baked into the returned string rather than wrapped by the caller, because a
+    // mark is printed on nearly every line and an allocator on that path buys nothing.
     //
     pub fn check(self: Style) []const u8 {
-        return if (self.icons) check_icon else "OK";
+        if (!self.color) {
+            return if (self.icons) check_icon else "OK";
+        }
+        return if (self.icons) green ++ check_icon ++ reset else green ++ "OK" ++ reset;
     }
 
     //
-    // The mark for a failure, or its ASCII stand-in when icons are off.
+    // The mark for a failure: red when color is on.
     //
     pub fn cross(self: Style) []const u8 {
-        return if (self.icons) cross_icon else "X";
+        if (!self.color) {
+            return if (self.icons) cross_icon else "X";
+        }
+        return if (self.icons) red ++ cross_icon ++ reset else red ++ "X" ++ reset;
     }
 
     //
-    // The mark for a next step, or its ASCII stand-in when icons are off.
+    // The mark for a next step, dimmed so the things it sits between stay louder than it.
     //
     pub fn arrow(self: Style) []const u8 {
-        return if (self.icons) arrow_icon else "->";
+        if (!self.color) {
+            return if (self.icons) arrow_icon else "->";
+        }
+        return if (self.icons) dim ++ arrow_icon ++ reset else dim ++ "->" ++ reset;
     }
 
     //
-    // The mark for a package, or its ASCII stand-in when icons are off.
+    // The mark for a package, or its ASCII stand-in when icons are off. Never coloured: the emoji
+    // carries its own.
     //
     pub fn package(self: Style) []const u8 {
         return if (self.icons) package_icon else "#";

@@ -59,18 +59,34 @@ pub fn isReserved(candidate: []const u8) bool {
 // Both trees are made even when the user only wants one, because a package with both trees is what
 // gives Claude `skills/loc` and `commands/loc` directly rather than the skills-only remap. An empty
 // tree is a valid package that contributes no items. Existing directories are left alone; a symlink
-// or a regular file at either path is an error.
+// or a regular file at either path is an error. True when a directory had to be created.
 //
 pub fn ensureTrees(
     io: std.Io,
     allocator: std.mem.Allocator,
     scratch_dir: []const u8,
     fail: *Failure,
-) failure.Error!void {
-    try link.ensureRealDirectory(io, scratch_dir, fail);
-    try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "skills" }), fail);
-    try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "commands" }), fail);
+) failure.Error!bool {
+    const made_root = try link.ensureRealDirectory(io, scratch_dir, fail);
+    const made_skills = try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "skills" }), fail);
+    const made_commands = try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "commands" }), fail);
+    return made_root or made_skills or made_commands;
 }
+
+//
+// Whether a sync had anything to do, so a caller can stay quiet when it did not.
+//
+pub const Status = enum {
+    //
+    // Both trees and all four links were already in place; nothing was created.
+    //
+    unchanged,
+
+    //
+    // A tree or a link was missing or pointed elsewhere, and was created or repaired.
+    //
+    changed,
+};
 
 //
 // Creates the trees for this scope and links them into Cursor and Claude as `loc`.
@@ -79,14 +95,19 @@ pub fn ensureTrees(
 // elsewhere, and refuses a real file. That is what lets `install` and `update` repair a namespace a
 // user deleted without any repair code of their own.
 //
+// The trees and the linker each say whether they had to do anything, so the caller can tell a
+// repair from a no-op: a command that announced the scratch directory on every run would bury the
+// result the user asked for.
+//
 pub fn sync(
     io: std.Io,
     allocator: std.mem.Allocator,
     scope: paths.Scope,
     fail: *Failure,
-) failure.Error!void {
-    try ensureTrees(io, allocator, scope.scratch_dir, fail);
-    try link.linkPackage(io, allocator, scope.scratch_dir, namespace, scope, fail);
+) failure.Error!Status {
+    const made_trees = try ensureTrees(io, allocator, scope.scratch_dir, fail);
+    const linked = try link.linkPackage(io, allocator, scope.scratch_dir, namespace, scope, fail);
+    return if (made_trees or linked == .changed) .changed else .unchanged;
 }
 
 test {

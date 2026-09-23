@@ -14,9 +14,15 @@ test "detectStyle enables color and icons on a TTY with nothing disabling them" 
     const style = term.detectStyle(&.{}, &env, true);
     try testing.expect(style.color);
     try testing.expect(style.icons);
-    try testing.expectEqualStrings(term.check_icon, style.check());
-    try testing.expectEqualStrings(term.cross_icon, style.cross());
-    try testing.expectEqualStrings(term.arrow_icon, style.arrow());
+    //
+    // With color on the marks carry their own escape, so the icon is present and wrapped rather
+    // than returned bare.
+    //
+    try testing.expect(std.mem.indexOf(u8, style.check(), term.check_icon) != null);
+    try testing.expect(std.mem.startsWith(u8, style.check(), "\x1b[32m"));
+    try testing.expect(std.mem.indexOf(u8, style.cross(), term.cross_icon) != null);
+    try testing.expect(std.mem.startsWith(u8, style.cross(), "\x1b[31m"));
+    try testing.expect(std.mem.indexOf(u8, style.arrow(), term.arrow_icon) != null);
     try testing.expectEqualStrings(term.package_icon, style.package());
 }
 
@@ -115,4 +121,12 @@ test "nonInteractive is true when stdin is not a TTY" {
     var env = std.process.Environ.Map.init(arena.allocator());
 
     try testing.expect(term.nonInteractive(&.{}, &env, false));
+}
+
+test "marks carry no escape when color is off" {
+    const style = term.Style{ .color = false, .icons = false };
+    try testing.expectEqualStrings("OK", style.check());
+    try testing.expectEqualStrings("X", style.cross());
+    try testing.expectEqualStrings("->", style.arrow());
+    try testing.expectEqualStrings("#", style.package());
 }

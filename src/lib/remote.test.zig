@@ -82,7 +82,7 @@ test "parse rejects a filesystem path" {
     for (specs) |spec| {
         var fail = failure.Failure.init(allocator);
         try testing.expectError(error.Failed, remote.parse(allocator, spec, &fail));
-        try testing.expect(std.mem.indexOf(u8, fail.text(), "filesystem") != null);
+        try testing.expect(std.mem.indexOf(u8, fail.text(), "Filesystem") != null);
     }
 }
 

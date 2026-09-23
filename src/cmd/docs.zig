@@ -53,7 +53,7 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const scope = try shared.scopeOf(ctx, args.global);
     const file = try shared.requireConfig(ctx, scope.config_path);
     if (file.packages.len == 0) {
-        return ctx.fail.set("no packages in skl.yaml", .{});
+        return ctx.fail.set("There are no packages in skl.yaml.", .{});
     }
 
     const pkg = try selectPackage(ctx, file.packages, args.query);
@@ -94,7 +94,7 @@ fn selectPackage(
         return matched.pkg;
     }
     if (ctx.non_interactive) {
-        return ctx.fail.set("docs requires a package name when non-interactive", .{});
+        return ctx.fail.set("The docs command requires a package name when non-interactive.", .{});
     }
     for (packages, 0..) |pkg, i| {
         try shared.line(ctx, "{d}. {s}  {s}", .{ i + 1, pkg.namespace, pkg.repo });
@@ -102,10 +102,10 @@ fn selectPackage(
     shared.promptWrite(ctx, "Select a package: ", .{});
     const answer = try shared.promptLine(ctx);
     const n = std.fmt.parseInt(usize, answer, 10) catch {
-        return ctx.fail.set("expected a package number", .{});
+        return ctx.fail.set("Expected a package number.", .{});
     };
     if (n == 0 or n > packages.len) {
-        return ctx.fail.set("expected a package number", .{});
+        return ctx.fail.set("Expected a package number.", .{});
     }
     return packages[n - 1];
 }
@@ -120,13 +120,13 @@ fn printDetails(
     pages: []const u8,
 ) skilled.failure.Error!void {
     try shared.line(ctx, "{s} {s}", .{ ctx.style.package(), parsed.repo });
-    try shared.line(ctx, "namespace: {s}", .{pkg.namespace});
-    try shared.line(ctx, "repo: {s}", .{pkg.repo});
+    try shared.line(ctx, "Namespace: {s}", .{try shared.namespaceText(ctx, pkg.namespace)});
+    try shared.line(ctx, "Repo: {s}", .{try shared.identifier(ctx, pkg.repo)});
     if (pkg.branch) |branch| {
-        try shared.line(ctx, "branch: {s}", .{branch});
+        try shared.line(ctx, "Branch: {s}", .{try shared.identifier(ctx, branch)});
     }
     if (pkg.local) |local_path| {
-        try shared.line(ctx, "local: {s}", .{local_path});
+        try shared.line(ctx, "Local: {s}", .{try shared.muted(ctx, local_path)});
     }
 
     const dest = shared.contentDir(ctx, pkg) catch |err| switch (err) {
@@ -136,7 +136,7 @@ fn printDetails(
     if (dest) |path| {
         if (shared.dirExists(ctx.io, path)) {
             if (try package.readmeDescription(ctx.io, ctx.allocator, path, ctx.fail)) |description| {
-                try shared.line(ctx, "{s}", .{description});
+                try shared.line(ctx, "{s}", .{try shared.muted(ctx, description)});
             }
             var scan_fail = skilled.failure.Failure.init(ctx.allocator);
             if (package.scan(ctx.io, ctx.allocator, path, &scan_fail)) |items| {
@@ -147,7 +147,7 @@ fn printDetails(
         }
     }
 
-    try shared.line(ctx, "GitHub Pages: {s}", .{pages});
+    try shared.line(ctx, "GitHub Pages: {s}", .{try shared.identifier(ctx, pages)});
 }
 
 //

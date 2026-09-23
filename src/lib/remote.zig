@@ -50,16 +50,16 @@ pub const Remote = struct {
 //
 pub fn parse(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
     if (spec.len == 0) {
-        return fail.set("remote is empty; expected owner/repo or git@host:owner/repo", .{});
+        return fail.set("Remote is empty; expected owner/repo or git@host:owner/repo.", .{});
     }
     if (startsWithIgnoreCase(spec, "https://") or startsWithIgnoreCase(spec, "http://")) {
-        return fail.set("HTTPS remotes are not supported; use owner/repo or git@host:owner/repo", .{});
+        return fail.set("HTTPS remotes are not supported; use owner/repo or git@host:owner/repo.", .{});
     }
     if (startsWithIgnoreCase(spec, "github:")) {
-        return fail.set("`github:` remotes are not supported; use owner/repo or git@host:owner/repo", .{});
+        return fail.set("Remotes of the form `github:` are not supported; use owner/repo or git@host:owner/repo.", .{});
     }
     if (isFilesystemPath(spec)) {
-        return fail.set("filesystem paths are not supported; use owner/repo or git@host:owner/repo", .{});
+        return fail.set("Filesystem paths are not supported; use owner/repo or git@host:owner/repo.", .{});
     }
     if (std.mem.startsWith(u8, spec, "git@")) {
         return parseSsh(allocator, spec, fail);
@@ -75,14 +75,14 @@ pub fn parse(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Fail
 //
 pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) failure.Error!void {
     if (name.len == 0) {
-        return fail.set("invalid {s}: empty", .{what});
+        return fail.set("Invalid {s}: it is empty.", .{what});
     }
     if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) {
-        return fail.set("invalid {s} '{s}': '.' and '..' are not allowed", .{ what, name });
+        return fail.set("Invalid {s} '{s}': '.' and '..' are not allowed.", .{ what, name });
     }
     for (name) |c| {
         if (!isNameChar(c)) {
-            return fail.set("invalid {s} '{s}': must match [A-Za-z0-9._-]+", .{ what, name });
+            return fail.set("Invalid {s} '{s}': it must match [A-Za-z0-9._-]+.", .{ what, name });
         }
     }
 }
@@ -95,41 +95,41 @@ pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) 
 //
 pub fn validateBranch(name: []const u8, fail: *failure.Failure) failure.Error!void {
     if (name.len == 0) {
-        return fail.set("invalid branch: empty", .{});
+        return fail.set("Invalid branch: it is empty.", .{});
     }
     if (std.ascii.eqlIgnoreCase(name, "HEAD")) {
-        return fail.set("invalid branch '{s}'", .{name});
+        return fail.set("Invalid branch '{s}'.", .{name});
     }
     if (name[0] == '-') {
-        return fail.set("invalid branch '{s}': must not start with '-'", .{name});
+        return fail.set("Invalid branch '{s}': it must not start with '-'.", .{name});
     }
     for (name) |c| {
         if (c == '\\' or c == ':' or c == '<' or c == '>' or c == '"' or c == '|' or c == '?' or c == '*') {
-            return fail.set("invalid branch '{s}'", .{name});
+            return fail.set("Invalid branch '{s}'.", .{name});
         }
     }
     if (name[0] == '/' or name[name.len - 1] == '/') {
-        return fail.set("invalid branch '{s}'", .{name});
+        return fail.set("Invalid branch '{s}'.", .{name});
     }
     var segments = std.mem.splitScalar(u8, name, '/');
     while (segments.next()) |segment| {
         if (segment.len == 0) {
-            return fail.set("invalid branch '{s}'", .{name});
+            return fail.set("Invalid branch '{s}'.", .{name});
         }
         try validateName(segment, "branch", fail);
     }
 }fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
     const rest = spec["git@".len..];
     const colon = std.mem.indexOfScalar(u8, rest, ':') orelse {
-        return fail.set("invalid SSH remote '{s}'; expected git@host:owner/repo", .{spec});
+        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
     };
     const host = rest[0..colon];
     const path = rest[colon + 1 ..];
     const slash = std.mem.indexOfScalar(u8, path, '/') orelse {
-        return fail.set("invalid SSH remote '{s}'; expected git@host:owner/repo", .{spec});
+        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
     };
     if (std.mem.indexOfScalar(u8, path[slash + 1 ..], '/') != null) {
-        return fail.set("invalid SSH remote '{s}'; expected git@host:owner/repo", .{spec});
+        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
     }
     const owner = path[0..slash];
     const repo = stripGitSuffix(path[slash + 1 ..]);
@@ -144,10 +144,10 @@ pub fn validateBranch(name: []const u8, fail: *failure.Failure) failure.Error!vo
 //
 fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
     const slash = std.mem.indexOfScalar(u8, spec, '/') orelse {
-        return fail.set("invalid remote '{s}'; expected owner/repo or git@host:owner/repo", .{spec});
+        return fail.set("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec});
     };
     if (std.mem.indexOfScalar(u8, spec[slash + 1 ..], '/') != null) {
-        return fail.set("invalid remote '{s}'; expected owner/repo or git@host:owner/repo", .{spec});
+        return fail.set("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec});
     }
     const owner = spec[0..slash];
     const repo = stripGitSuffix(spec[slash + 1 ..]);
@@ -163,12 +163,12 @@ fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8, fail: *failure
 //
 fn validateHost(host: []const u8, fail: *failure.Failure) failure.Error!void {
     if (host.len == 0) {
-        return fail.set("invalid host: empty", .{});
+        return fail.set("Invalid host: it is empty.", .{});
     }
     var labels = std.mem.splitScalar(u8, host, '.');
     while (labels.next()) |label| {
         if (label.len == 0) {
-            return fail.set("invalid host '{s}': empty label", .{host});
+            return fail.set("Invalid host '{s}': it has an empty label.", .{host});
         }
         try validateName(label, "host", fail);
     }

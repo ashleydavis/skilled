@@ -28,6 +28,11 @@ const config = skilled.config;
 const from = skilled.from;
 
 //
+// HEAD of the fresh clone, reported on the success line.
+//
+const git = skilled.git;
+
+//
 // Namespace symlinks into Cursor and Claude.
 //
 const link = skilled.link;
@@ -102,23 +107,23 @@ pub const Args = struct {
 pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     if (args.from) |spec| {
         if (args.repo != null) {
-            return ctx.fail.set("add --from cannot be used with a repo", .{});
+            return ctx.fail.set("Cannot use add --from together with a repo.", .{});
         }
         if (args.namespace != null) {
-            return ctx.fail.set("--ns is not used with --from", .{});
+            return ctx.fail.set("The --ns flag is not used with --from.", .{});
         }
         if (args.branch != null) {
-            return ctx.fail.set("--branch is not used with --from", .{});
+            return ctx.fail.set("The --branch flag is not used with --from.", .{});
         }
         if (args.local != null) {
-            return ctx.fail.set("--local is not used with --from", .{});
+            return ctx.fail.set("The --local flag is not used with --from.", .{});
         }
         return runFrom(ctx, args.global, spec);
     }
     if (args.branch != null and args.local != null) {
-        return ctx.fail.set("--branch cannot be used with --local", .{});
+        return ctx.fail.set("The --branch flag cannot be used with --local.", .{});
     }
-    const spec = args.repo orelse return ctx.fail.set("add requires a repo or --from", .{});
+    const spec = args.repo orelse return ctx.fail.set("The add command requires a repo or --from.", .{});
 
     const scope = try shared.scopeOf(ctx, args.global);
     const file = try shared.requireConfig(ctx, scope.config_path);
@@ -130,10 +135,10 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     // The interactive prompt returns into this same variable, so it is checked too.
     //
     if (scratch.isReserved(namespace)) {
-        return ctx.fail.set("namespace \"{s}\" is reserved for the scratch directory", .{namespace});
+        return ctx.fail.set("Namespace \"{s}\" is reserved for the scratch directory.", .{namespace});
     }
     if (shared.namespaceTaken(file.packages, namespace)) |taken| {
-        return ctx.fail.set("namespace \"{s}\" is already used by {s}", .{ namespace, taken.repo });
+        return ctx.fail.set("Namespace \"{s}\" is already used by {s}.", .{ namespace, taken.repo });
     }
 
     var spinner = shared.newSpinner(ctx);
@@ -148,9 +153,15 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
         });
         try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended, ctx.fail);
         spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ namespace, spec }));
-        try link.linkPackage(ctx.io, ctx.allocator, dest, namespace, scope, ctx.fail);
+        _ = try link.linkPackage(ctx.io, ctx.allocator, dest, namespace, scope, ctx.fail);
         spinner.finish();
-        try shared.line(ctx, "{s} {s} -> {s}", .{ ctx.style.check(), spec, namespace });
+        const local_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, dest, ctx.fail);
+        try shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
+            ctx.style.check(),
+            try shared.identifier(ctx, spec),
+            try shared.namespaceText(ctx, namespace),
+            try shared.muted(ctx, shared.shortSha(local_sha)),
+        });
         return 0;
     }
 
@@ -165,14 +176,25 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended, ctx.fail);
 
     spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ namespace, resolved.parsed.repo }));
-    try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, namespace, scope, ctx.fail);
+    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, namespace, scope, ctx.fail);
     spinner.finish();
 
-    try shared.line(ctx, "{s} {s}/{s} -> {s}", .{
-        ctx.style.check(),
+    const added = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{
         resolved.parsed.owner,
         resolved.parsed.repo,
-        namespace,
+    });
+    //
+    // The commit the namespace is pinned to right now, so the line says which revision was linked
+    // rather than only that something was. Every package is a git repository — the scratch
+    // directory is the one tree that is not, and it is never added — so a clone that cannot report
+    // HEAD is a real failure, not a line printed without its SHA.
+    //
+    const sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
+    try shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
+        ctx.style.check(),
+        try shared.identifier(ctx, added),
+        try shared.namespaceText(ctx, namespace),
+        try shared.muted(ctx, shared.shortSha(sha)),
     });
     return 0;
 }
@@ -197,17 +219,17 @@ pub fn buildCommand(ctx: *const Context) *Command {
 fn resolveNamespace(ctx: *const Context, namespace_opt: ?[]const u8) skilled.failure.Error![]const u8 {
     if (namespace_opt) |ns| {
         if (ns.len == 0) {
-            return ctx.fail.set("--ns is required", .{});
+            return ctx.fail.set("The --ns flag is required.", .{});
         }
         return ns;
     }
     if (ctx.non_interactive) {
-        return ctx.fail.set("--ns is required", .{});
+        return ctx.fail.set("The --ns flag is required.", .{});
     }
     shared.promptWrite(ctx, "Namespace: ", .{});
     const ns = try shared.promptLine(ctx);
     if (ns.len == 0) {
-        return ctx.fail.set("--ns is required", .{});
+        return ctx.fail.set("The --ns flag is required.", .{});
     }
     return ns;
 }
@@ -237,7 +259,7 @@ fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.
     const fetched = try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec, ctx.fail);
     const merged = try from.mergePackages(ctx.allocator, file.packages, fetched.packages, ctx.fail);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = merged }, ctx.fail);
-    try shared.line(ctx, "updated {s}", .{scope.config_path});
+    try shared.line(ctx, "Updated {s}.", .{try shared.muted(ctx, scope.config_path)});
     return 0;
 }
 

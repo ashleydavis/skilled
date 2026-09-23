@@ -100,6 +100,7 @@ const HELP_EXAMPLES =
 //
 pub fn buildProgram(ctx: *const Context) *commander.Command {
     const program = commander.program(ctx.allocator)
+        .style(ctx.style)
         .name("skl")
         .description("Install AI agent skill packages from git.")
         .version(skilled.version.version, "-V, --version", "output the version number")
@@ -132,7 +133,9 @@ pub fn main(init: std.process.Init) u8 {
         if (err == error.OutOfMemory and fail.message == null) {
             _ = fail.set("skl ran out of memory.", .{}) catch {};
         }
-        break :blk reportFailure(&fail, &stderr_file.interface);
+        const stderr_is_tty = std.Io.File.stderr().isTty(init.io) catch false;
+        const style = term.detectStyle(&.{}, init.environ_map, stderr_is_tty);
+        break :blk reportFailure(&fail, &stderr_file.interface, style);
     };
 
     stdout_file.interface.flush() catch {};
@@ -142,10 +145,17 @@ pub fn main(init: std.process.Init) u8 {
 //
 // Prints a failure and gives the exit code to use.
 //
+// Red when the stream takes color, so a refusal is distinguishable from ordinary output at a
+// glance; plain text when `--no-color`, `NO_COLOR`, or a redirected stream turns color off.
+//
 // Public so the tests in main.test.zig can reach it with a buffer writer.
 //
-pub fn reportFailure(fail: *Failure, writer: *std.Io.Writer) u8 {
-    writer.print("{s}\n", .{fail.text()}) catch {};
+pub fn reportFailure(fail: *Failure, writer: *std.Io.Writer, style: term.Style) u8 {
+    if (style.color) {
+        writer.print("\x1b[31m{s}\x1b[0m\n", .{fail.text()}) catch {};
+    } else {
+        writer.print("{s}\n", .{fail.text()}) catch {};
+    }
     return 1;
 }
 
@@ -160,7 +170,7 @@ fn run(
     fail: *Failure,
 ) skilled.failure.Error!u8 {
     const argv = init.minimal.args.toSlice(allocator) catch |err| {
-        return fail.set("Failed to read the command line: {s}", .{@errorName(err)});
+        return fail.set("Failed to read the command line: {s}.", .{@errorName(err)});
     };
     const arguments = if (argv.len > 1) argv[1..] else &[_][:0]const u8{};
 
@@ -170,11 +180,11 @@ fn run(
     }
 
     const cwd = std.process.currentPathAlloc(init.io, allocator) catch |err| {
-        return fail.set("Failed to read the working directory: {s}", .{skilled.files.describeError(err)});
+        return fail.set("Failed to read the working directory: {s}.", .{skilled.files.describeError(err)});
     };
 
     const home = paths.homeDir(init.environ_map) catch {
-        return fail.set("HOME is not set", .{});
+        return fail.set("HOME is not set.", .{});
     };
 
     const stdout_is_tty = std.Io.File.stdout().isTty(init.io) catch false;

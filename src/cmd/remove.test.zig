@@ -89,7 +89,7 @@ test "remove errors on an ambiguous match" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "ambiguous") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "Ambiguous") != null);
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/other") != null);
@@ -116,7 +116,7 @@ test "remove without config errors" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "remove of a local package unlinks the namespace and drops YAML" {

@@ -17,7 +17,7 @@ test "init creates YAML when the project has none" {
 
     const text = try scenario.readProjectYaml();
     try testing.expectEqualStrings("packages: []\n", text);
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "wrote") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "Wrote") != null);
 }
 
 test "init leaves an existing empty YAML alone" {

@@ -268,7 +268,7 @@ test "an unknown option is refused in commander's words" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{"--nosuchoption"}, &captured);
 
-    try testing.expectEqualStrings("error: unknown option '--nosuchoption'", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--nosuchoption'.", runner.message.?);
     try testing.expect(!recorder.ran);
 }
 
@@ -281,7 +281,7 @@ test "an option with no value is refused, quoting the flags" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{ "summary", "--config" }, &captured);
 
-    try testing.expectEqualStrings("error: option '--config <path>' argument missing", runner.message.?);
+    try testing.expectEqualStrings("Option '--config <path>' is missing its argument.", runner.message.?);
 }
 
 test "an unknown command is refused and named" {
@@ -293,7 +293,7 @@ test "an unknown command is refused and named" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{"badcommand"}, &captured);
 
-    try testing.expectEqualStrings("error: unknown command 'badcommand'", runner.message.?);
+    try testing.expectEqualStrings("Unknown command 'badcommand'.", runner.message.?);
 }
 
 test "an argument a command does not take is refused" {
@@ -305,7 +305,7 @@ test "an argument a command does not take is refused" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{ "summary", "extra" }, &captured);
 
-    try testing.expect(std.mem.startsWith(u8, runner.message.?, "error: too many arguments"));
+    try testing.expect(std.mem.startsWith(u8, runner.message.?, "Too many arguments"));
 }
 
 test "an option a subcommand does not declare is refused rather than ignored" {
@@ -317,7 +317,7 @@ test "an option a subcommand does not declare is refused rather than ignored" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{ "baseline", "capture", "--output", "json" }, &captured);
 
-    try testing.expectEqualStrings("error: unknown option '--output'", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--output'.", runner.message.?);
 }
 
 test "--help prints the help and does not run anything" {
@@ -358,7 +358,7 @@ test "the program's help option can be respelled, and the default one then stops
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runLine(allocator, &recorder, &.{"-h"}, &captured);
 
-    try testing.expectEqualStrings("error: unknown option '-h'", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '-h'.", runner.message.?);
 }
 
 test "--version and -v print the version" {
@@ -417,7 +417,7 @@ test "renderHelp lays the program out in commander's shape" {
     try testing.expect(std.mem.indexOf(u8, help, "  --help             Print this text.") != null);
     try testing.expect(std.mem.indexOf(u8, help, "\nCommands:\n") != null);
     try testing.expect(std.mem.indexOf(u8, help, "  summary [options]") != null);
-    try testing.expect(std.mem.indexOf(u8, help, "  help [command]     display help for command") != null);
+    try testing.expect(std.mem.indexOf(u8, help, "  help [command]     Display help for command.") != null);
 }
 
 test "renderHelp names a subcommand's aliases and what it accepts" {
@@ -529,7 +529,7 @@ fn recordSklAction(invocation: *commander.Invocation) anyerror!void {
 fn buildSklProgram(allocator: std.mem.Allocator, recorder: *SklRecorder) !*commander.Command {
     const root = commander.Command.init(allocator, "skl");
     _ = root.description("Install AI agent skill packages from git.")
-        .version("0.0.1", "-V, --version", "output the version number")
+        .version("0.0.1", "-V, --version", "Output the version number.")
         .option("-g, --global", "Use the global config.", null)
         .option("--no-color", "Disable color and icons.", null)
         .option("-n, --non-interactive", "Do not prompt.", null);
@@ -631,7 +631,7 @@ test "an unknown option on the skl-shaped program is still refused" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runSklLine(allocator, &recorder, &.{ "add", "--nosuch" }, &captured);
 
-    try testing.expectEqualStrings("error: unknown option '--nosuch'", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--nosuch'.", runner.message.?);
     try testing.expect(!recorder.ran);
 }
 
@@ -643,13 +643,13 @@ test "--open is unknown on docs and add" {
     var docs_recorder = SklRecorder{};
     var docs_captured = std.Io.Writer.Allocating.init(allocator);
     const docs_runner = try runSklLine(allocator, &docs_recorder, &.{ "docs", "--open", "acme/skills" }, &docs_captured);
-    try testing.expectEqualStrings("error: unknown option '--open'", docs_runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--open'.", docs_runner.message.?);
     try testing.expect(!docs_recorder.ran);
 
     var add_recorder = SklRecorder{};
     var add_captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runSklLine(allocator, &add_recorder, &.{ "add", "--open" }, &add_captured);
-    try testing.expectEqualStrings("error: unknown option '--open'", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--open'.", runner.message.?);
     try testing.expect(!add_recorder.ran);
 }
 
@@ -662,7 +662,7 @@ test "--ns still requires a value" {
     var captured = std.Io.Writer.Allocating.init(allocator);
     const runner = try runSklLine(allocator, &recorder, &.{ "add", "--ns" }, &captured);
 
-    try testing.expectEqualStrings("error: option '--ns <namespace>' argument missing", runner.message.?);
+    try testing.expectEqualStrings("Option '--ns <namespace>' is missing its argument.", runner.message.?);
     try testing.expect(!recorder.ran);
 }
 

@@ -30,8 +30,8 @@ test "list formats package and items as ns:name including nested commands" {
     try testing.expect(std.mem.indexOf(u8, out, "skills") != null);
     try testing.expect(std.mem.indexOf(u8, out, "demo") != null);
     try testing.expect(std.mem.indexOf(u8, out, "acme/skills") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "cmd:plan/create") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      plan/create") != null);
 }
 
 test "list missing config errors" {
@@ -40,7 +40,7 @@ test "list missing config errors" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, list.run(&ctx, .{}));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "list missing store clone still prints the YAML row" {
@@ -59,8 +59,8 @@ test "list missing store clone still prints the YAML row" {
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, "acme/skills") != null);
     try testing.expect(std.mem.indexOf(u8, out, "demo") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "not installed") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") == null);
+    try testing.expect(std.mem.indexOf(u8, out, "Not installed.") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") == null);
 }
 
 test "list of a local row shows items from that tree" {
@@ -81,8 +81,8 @@ test "list of a local row shows items from that tree" {
     try testing.expectEqual(@as(u8, 0), try list.run(&ctx, .{}));
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, local) != null);
-    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "not installed") == null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "Not installed.") == null);
 }
 
 test "list of a branch row lists items from the store" {
@@ -103,7 +103,7 @@ test "list of a branch row lists items from the store" {
     try testing.expectEqual(@as(u8, 0), try list.run(&ctx, .{}));
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, "feature") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "demo:hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") != null);
 }
 
 test "list prints a scratch skill and command as loc items" {
@@ -120,9 +120,9 @@ test "list prints a scratch skill and command as loc items" {
 
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, "scratch") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "loc:hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") != null);
     try testing.expect(std.mem.indexOf(u8, out, "Scratch hello") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "loc:plan/create") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      plan/create") != null);
 }
 
 test "list prints the scratch section when the YAML lists no packages" {
@@ -139,7 +139,7 @@ test "list prints the scratch section when the YAML lists no packages" {
 
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, "no packages") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "loc:hello") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "      hello") != null);
 }
 
 test "list prints no scratch section when the directory is absent" {
@@ -172,8 +172,8 @@ test "list keeps package items when a scratch section follows" {
     try testing.expectEqual(@as(u8, 0), try list.run(&ctx, .{}));
 
     const out = scenario.printed();
-    const demo_at = std.mem.indexOf(u8, out, "demo:hello");
-    const loc_at = std.mem.indexOf(u8, out, "loc:hello");
+    const demo_at = std.mem.indexOf(u8, out, "demo —");
+    const loc_at = std.mem.indexOf(u8, out, "loc —");
     try testing.expect(demo_at != null);
     try testing.expect(loc_at != null);
     try testing.expect(demo_at.? < loc_at.?);

@@ -10,7 +10,7 @@ const update = @import("update.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
 
-test "update prints unchanged when HEAD does not move" {
+test "update says a package is already up to date when HEAD does not move" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
@@ -22,7 +22,7 @@ test "update prints unchanged when HEAD does not move" {
     scenario.clear();
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{}));
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "unchanged") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "is already up to date") != null);
 }
 
 test "update prints old SHA to new SHA when HEAD moves" {
@@ -38,9 +38,9 @@ test "update prints old SHA to new SHA when HEAD moves" {
     scenario.clear();
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.head) != null);
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.next_head) != null);
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "unchanged") == null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.head[0..7]) != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.next_head[0..7]) != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "is already up to date") == null);
 }
 
 test "update errors on a dirty tree" {
@@ -64,7 +64,7 @@ test "update without config errors" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, update.run(&ctx, .{}));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "update --branch without query errors" {
@@ -191,7 +191,7 @@ test "no-flag update of a local row does not fetch" {
     scenario.git.calls.clearRetainingCapacity();
     const ctx = scenario.context();
     try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "demo" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "local") != null);
+    try testing.expect(std.mem.indexOf(u8, scenario.printed(), "local tree") != null);
     for (scenario.git.calls.items) |call| {
         try testing.expect(!(call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], "fetch")));
     }

@@ -55,7 +55,7 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const file = try shared.requireConfig(ctx, scope.config_path);
 
     if (file.packages.len == 0) {
-        try shared.line(ctx, "no packages", .{});
+        try shared.line(ctx, "There are no packages.", .{});
         try printScratch(ctx, scope);
         return 0;
     }
@@ -72,54 +72,49 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
 //
 pub fn buildCommand(ctx: *const Context) *Command {
     return Command.init(ctx.allocator, "list")
-        .description("Print packages and each skill/command as ns:name.")
+        .description("Print each namespace with its skills and commands.")
         .action(ctx, action);
 }
 
 //
-// One YAML row, plus items when the package directory is present.
+// One namespace block: the heading, the package blurb, then its items by kind.
 //
 fn printPackage(ctx: *const Context, pkg: skilled.config.Package) skilled.failure.Error!void {
-    var parse_fail = skilled.failure.Failure.init(ctx.allocator);
-    const parsed = skilled.remote.parse(ctx.allocator, pkg.repo, &parse_fail) catch null;
-    const name = if (parsed) |remote| remote.repo else pkg.repo;
+    const source = if (pkg.local) |local_path|
+        try std.fmt.allocPrint(ctx.allocator, "{s} (local {s})", .{ pkg.repo, local_path })
+    else if (pkg.branch) |branch|
+        try std.fmt.allocPrint(ctx.allocator, "{s} (branch {s})", .{ pkg.repo, branch })
+    else
+        pkg.repo;
 
-    const title = try shared.paint(ctx.allocator, ctx.style, "1;36", name);
-    if (pkg.local) |local_path| {
-        try shared.line(ctx, "{s} {s}  {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo, local_path });
-    } else if (pkg.branch) |branch| {
-        try shared.line(ctx, "{s} {s}  {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo, branch });
-    } else {
-        try shared.line(ctx, "{s} {s}  {s}  {s}", .{ ctx.style.package(), title, pkg.namespace, pkg.repo });
-    }
+    try printHeading(ctx, pkg.namespace, source);
 
     const dest = shared.contentDir(ctx, pkg) catch |err| switch (err) {
         error.Failed => {
-            try shared.line(ctx, "  not installed", .{});
+            try printNote(ctx, "Not installed.");
             return;
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
     if (!shared.dirExists(ctx.io, dest)) {
-        try shared.line(ctx, "  not installed", .{});
+        try printNote(ctx, "Not installed.");
         return;
     }
 
     if (try package.readmeDescription(ctx.io, ctx.allocator, dest, ctx.fail)) |description| {
-        const dim = try shared.paint(ctx.allocator, ctx.style, "2", description);
-        try shared.line(ctx, "  {s}", .{dim});
+        try printNote(ctx, description);
     }
 
     var scan_fail = skilled.failure.Failure.init(ctx.allocator);
     const items = package.scan(ctx.io, ctx.allocator, dest, &scan_fail) catch {
-        try shared.line(ctx, "  not installed", .{});
+        try printNote(ctx, "Not installed.");
         return;
     };
-    try printItems(ctx, pkg.namespace, items);
+    try printItems(ctx, items);
 }
 
 //
-// The scratch directory and its items, printed in the same shape as a package.
+// The scratch directory as one more namespace block.
 //
 // Nothing is printed when the directory is not there: a scope where init and install have not run
 // has no scratch directory to describe, and list is not the command that creates it. A scan that
@@ -130,33 +125,90 @@ fn printScratch(ctx: *const Context, scope: skilled.paths.Scope) skilled.failure
         return;
     }
 
-    const title = try shared.paint(ctx.allocator, ctx.style, "1;36", "scratch");
-    try shared.line(ctx, "{s} {s}  {s}  {s}", .{
-        ctx.style.package(),
-        title,
-        scratch.namespace,
-        scope.scratch_dir,
-    });
+    try printHeading(ctx, scratch.namespace, "scratch directory");
+    try printNote(ctx, scope.scratch_dir);
 
     var scan_fail = skilled.failure.Failure.init(ctx.allocator);
     const items = package.scan(ctx.io, ctx.allocator, scope.scratch_dir, &scan_fail) catch return;
-    try printItems(ctx, scratch.namespace, items);
+    try printItems(ctx, items);
 }
 
 //
-// The `ns:name` lines under a package or the scratch directory.
+// `<namespace> — <source>`, the line that opens a block.
 //
-// Shared so a scratch item and a package item cannot drift into two layouts.
+// The namespace is what the user types in an agent, so it is the one thing coloured; where the
+// files came from is dimmed behind it.
 //
-fn printItems(ctx: *const Context, namespace: []const u8, items: []const package.Item) skilled.failure.Error!void {
+fn printHeading(ctx: *const Context, namespace: []const u8, source: []const u8) skilled.failure.Error!void {
+    const name = try shared.namespaceText(ctx, namespace);
+    const from = try shared.muted(ctx, try std.fmt.allocPrint(ctx.allocator, "— {s}", .{source}));
+    try shared.line(ctx, "{s} {s}", .{ name, from });
+}
+
+//
+// A dim line under a heading: the package blurb, the scratch path, or why there is nothing to list.
+//
+fn printNote(ctx: *const Context, text: []const u8) skilled.failure.Error!void {
+    const dim = try shared.muted(ctx, text);
+    try shared.line(ctx, "   {s}", .{dim});
+}
+
+//
+// The items of one block, under a `skills` or `commands` sub-heading.
+//
+// Names are printed without the namespace because the heading above already carries it. The name
+// column is as wide as the longest name in this block, so descriptions line up within a block
+// without a listing-wide pass over every package.
+//
+fn printItems(ctx: *const Context, items: []const package.Item) skilled.failure.Error!void {
+    var width: usize = 0;
     for (items) |item| {
-        const id = try std.fmt.allocPrint(ctx.allocator, "{s}:{s}", .{ namespace, item.name });
-        if (item.description.len == 0) {
-            try shared.line(ctx, "  {s}", .{id});
-        } else {
-            try shared.line(ctx, "  {s}  {s}", .{ id, item.description });
+        if (item.name.len > width) {
+            width = item.name.len;
         }
     }
+
+    try printKind(ctx, items, .skill, "skills", width);
+    try printKind(ctx, items, .command, "commands", width);
+}
+
+//
+// One sub-heading and the items of that kind, or nothing when the package has none.
+//
+fn printKind(
+    ctx: *const Context,
+    items: []const package.Item,
+    kind: package.Kind,
+    label: []const u8,
+    width: usize,
+) skilled.failure.Error!void {
+    var seen = false;
+    for (items) |item| {
+        if (item.kind != kind) {
+            continue;
+        }
+        if (!seen) {
+            const heading = try shared.paint(ctx.allocator, ctx.style, skilled.term.label_color, label);
+            try shared.line(ctx, "   {s}", .{heading});
+            seen = true;
+        }
+        try printItem(ctx, item, width);
+    }
+}
+
+//
+// `      <name><padding>  <description>`, with the description dimmed behind the name.
+//
+fn printItem(ctx: *const Context, item: package.Item, width: usize) skilled.failure.Error!void {
+    if (item.description.len == 0) {
+        try shared.line(ctx, "      {s}", .{item.name});
+        return;
+    }
+
+    const padding = try ctx.allocator.alloc(u8, width - item.name.len);
+    @memset(padding, ' ');
+    const description = try shared.muted(ctx, item.description);
+    try shared.line(ctx, "      {s}{s}   {s}", .{ item.name, padding, description });
 }
 
 //

@@ -188,16 +188,16 @@ fn parseHttps(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) fa
 fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
     const rest = spec["git@".len..];
     const first = std.mem.indexOfScalar(u8, rest, ':') orelse {
-        return fail.set("invalid --from spec '{s}'; expected git@host:owner/repo:path", .{spec});
+        return fail.set("Invalid --from spec '{s}'; expected git@host:owner/repo:path.", .{spec});
     };
     const after_host = rest[first + 1 ..];
     const second = std.mem.indexOfScalar(u8, after_host, ':') orelse {
-        return fail.set("invalid --from spec '{s}'; path is required after the repo", .{spec});
+        return fail.set("Invalid --from spec '{s}'; a path is required after the repo.", .{spec});
     };
     const remote_spec = spec[0 .. "git@".len + first + 1 + second];
     const path = after_host[second + 1 ..];
     if (path.len == 0) {
-        return fail.set("invalid --from spec '{s}'; path is required after the repo", .{spec});
+        return fail.set("Invalid --from spec '{s}'; a path is required after the repo.", .{spec});
     }
     const parsed = try remote.parse(allocator, remote_spec, fail);
     const path_owned = try copyGitPath(allocator, path, fail);
@@ -213,12 +213,12 @@ fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) fail
 //
 fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
     const colon = std.mem.indexOfScalar(u8, spec, ':') orelse {
-        return fail.set("invalid --from spec '{s}'; expected owner/repo:path", .{spec});
+        return fail.set("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec});
     };
     const left = spec[0..colon];
     const path = spec[colon + 1 ..];
     if (left.len == 0 or path.len == 0) {
-        return fail.set("invalid --from spec '{s}'; expected owner/repo:path", .{spec});
+        return fail.set("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec});
     }
     const parsed = try remote.parse(allocator, left, fail);
     const path_owned = try copyGitPath(allocator, path, fail);
@@ -295,13 +295,13 @@ fn joinGitPath(allocator: std.mem.Allocator, parts: []const []const u8, fail: *F
 //
 fn copyGitPath(allocator: std.mem.Allocator, path: []const u8, fail: *Failure) failure.Error![]const u8 {
     if (path.len == 0) {
-        return fail.set("invalid --from spec: path is empty", .{});
+        return fail.set("Invalid --from spec: the path is empty.", .{});
     }
     var parts: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, path, '/');
     while (it.next()) |part| {
         if (part.len == 0) {
-            return fail.set("invalid --from path '{s}'", .{path});
+            return fail.set("Invalid --from path '{s}'.", .{path});
         }
         try parts.append(allocator, part);
     }

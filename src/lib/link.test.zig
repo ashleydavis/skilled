@@ -119,7 +119,7 @@ test "linkPackage creates skills and commands namespace links for Cursor and Cla
     defer fixture.temporary.destroy();
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
     const commands_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "commands" });
@@ -160,8 +160,8 @@ test "linkPackage is idempotent when the symlink already points at the store" {
     defer fixture.temporary.destroy();
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
     const commands_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "commands" });
@@ -186,8 +186,8 @@ test "linkPackage retargets from dest A to dest B" {
     try fixture.temporary.write("store-b/skills/hello/SKILL.md", "Other skill.\n");
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
-    try link.linkPackage(io, allocator, store_b, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, store_b, "demo", fixture.project, &fail);
 
     const skills_b = try files.joinPath(allocator, &.{ store_b, "skills" });
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_b);
@@ -206,7 +206,7 @@ test "unlinkPackage removes namespace links and leaves the store clone" {
     defer fixture.temporary.destroy();
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
     try link.unlinkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
     try expectMissing(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"));
@@ -275,7 +275,7 @@ test "linkPackage retargets a namespace symlink that pointed elsewhere" {
     try std.Io.Dir.cwd().symLink(io, other, blocking, .{ .is_directory = true });
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
     try expectSymlink(io, blocking, skills_dest);
@@ -315,11 +315,11 @@ test "linkPackage project vs global roots" {
     defer fixture.temporary.destroy();
 
     var project_fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &project_fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &project_fail);
     try expectMissing(io, try nsPath(allocator, fixture.global.cursor_skills, "demo"));
 
     var global_fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.global, &global_fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.global, &global_fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_dest);
@@ -340,7 +340,7 @@ test "linkPackage skills-only links Cursor skills and Claude commands" {
     defer fixture.temporary.destroy();
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
 
     const skills_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "skills" });
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_dest);
@@ -366,7 +366,7 @@ test "linkPackage commands-only links Cursor commands and Claude commands" {
     defer fixture.temporary.destroy();
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "cmd", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "cmd", fixture.project, &fail);
 
     const commands_dest = try files.joinPath(allocator, &.{ fixture.store_dir, "commands" });
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_commands, "cmd"), commands_dest);
@@ -441,7 +441,7 @@ test "linkPackage migrates leftover Cursor commands links onto skills" {
     try std.Io.Dir.cwd().symLink(io, skills_dest, leftover, .{ .is_directory = true });
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "demo", fixture.project, &fail);
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_skills, "demo"), skills_dest);
     try expectMissing(io, leftover);
 }
@@ -464,7 +464,7 @@ test "linkPackage migrates leftover Cursor skills links onto commands" {
     try std.Io.Dir.cwd().symLink(io, commands_dest, leftover, .{ .is_directory = true });
 
     var fail = failure.Failure.init(allocator);
-    try link.linkPackage(io, allocator, fixture.store_dir, "cmd", fixture.project, &fail);
+    _ = try link.linkPackage(io, allocator, fixture.store_dir, "cmd", fixture.project, &fail);
     try expectSymlink(io, try nsPath(allocator, fixture.project.cursor_commands, "cmd"), commands_dest);
     try expectMissing(io, leftover);
 }

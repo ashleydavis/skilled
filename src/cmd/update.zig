@@ -77,14 +77,14 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const file = try shared.requireConfig(ctx, scope.config_path);
 
     if (args.branch != null and args.local != null) {
-        return ctx.fail.set("--branch cannot be used with --local", .{});
+        return ctx.fail.set("The --branch flag cannot be used with --local.", .{});
     }
     if (args.branch != null or args.local != null) {
         const q = args.query orelse {
             if (args.branch != null) {
-                return ctx.fail.set("update --branch requires a package", .{});
+                return ctx.fail.set("The update --branch flag requires a package query.", .{});
             }
-            return ctx.fail.set("update --local requires a package", .{});
+            return ctx.fail.set("The update --local flag requires a package query.", .{});
         };
         const matched = try shared.requireOneMatch(ctx.allocator, file.packages, q, ctx.fail);
         if (args.local) |local_path| {
@@ -112,7 +112,7 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
         var one_ctx = ctx.*;
         one_ctx.fail = &one_fail;
         updateOne(&one_ctx, scope, pkg) catch {
-            return ctx.fail.set("update failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
+            return ctx.fail.set("Update failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
         };
     }
     return 0;
@@ -136,22 +136,25 @@ pub fn buildCommand(ctx: *const Context) *Command {
 fn updateOne(ctx: *const Context, scope: skilled.paths.Scope, pkg: skilled.config.Package) skilled.failure.Error!void {
     if (pkg.local) |local_path| {
         const dest = try shared.resolveLocal(ctx, local_path);
-        try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
-        try shared.line(ctx, "{s}  local {s}", .{ pkg.repo, dest });
+        _ = try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
+        try shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
+        try shared.identifier(ctx, pkg.repo),
+        try shared.muted(ctx, dest),
+    });
         return;
     }
 
     const resolved = try shared.resolveStore(ctx, pkg.repo);
     if (!shared.dirExists(ctx.io, resolved.dest)) {
-        return ctx.fail.set("{s} is not installed; run skl install", .{pkg.repo});
+        return ctx.fail.set("Package {s} is not installed; run skl install.", .{pkg.repo});
     }
 
     const old_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
     try git.fetchUpdate(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
     const new_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
 
-    try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
-    try printShaLine(ctx, resolved.parsed.repo, old_sha, new_sha);
+    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
+    try printShaLine(ctx, pkg.repo, old_sha, new_sha);
 }
 
 //
@@ -170,8 +173,11 @@ fn switchToLocal(
     pkg.branch = null;
     const rewritten = try replacePackage(ctx.allocator, file, matched.index, pkg);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten, ctx.fail);
-    try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
-    try shared.line(ctx, "{s}  local {s}", .{ pkg.repo, dest });
+    _ = try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
+    try shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
+        try shared.identifier(ctx, pkg.repo),
+        try shared.muted(ctx, dest),
+    });
 }
 
 //
@@ -201,13 +207,16 @@ fn switchToBranch(
     pkg.local = null;
     const rewritten = try replacePackage(ctx.allocator, file, matched.index, pkg);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten, ctx.fail);
-    try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
+    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
 
     const new_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
     if (old_sha) |old| {
-        try printShaLine(ctx, resolved.parsed.repo, old, new_sha);
+        try printShaLine(ctx, pkg.repo, old, new_sha);
     } else {
-        try shared.line(ctx, "{s}  {s}", .{ resolved.parsed.repo, new_sha });
+        try shared.line(ctx, "{s} is at {s}.", .{
+            try shared.identifier(ctx, pkg.repo),
+            try shared.muted(ctx, shared.shortSha(new_sha)),
+        });
     }
 }
 
@@ -229,7 +238,11 @@ fn replacePackage(
 }
 
 //
-// Unchanged versus old SHA arrow new SHA, matching the existing update line.
+// Either the package is already current, or it moved from one commit to another.
+//
+// The subject is the full `owner/repo`, the same name the user typed into `add` and the same one
+// in skl.yaml: a bare repo name reads as an ordinary word rather than as an identifier. SHAs are
+// abbreviated because the point of the line is that HEAD moved, not which bytes it moved to.
 //
 fn printShaLine(
     ctx: *const Context,
@@ -238,15 +251,15 @@ fn printShaLine(
     new_sha: []const u8,
 ) skilled.failure.Error!void {
     if (std.mem.eql(u8, old_sha, new_sha)) {
-        try shared.line(ctx, "{s}  unchanged", .{repo});
-    } else {
-        try shared.line(ctx, "{s}  {s} {s} {s}", .{
-            repo,
-            old_sha,
-            ctx.style.arrow(),
-            new_sha,
-        });
+        try shared.line(ctx, "{s} is already up to date.", .{try shared.identifier(ctx, repo)});
+        return;
     }
+    try shared.line(ctx, "{s} updated {s} {s} {s}.", .{
+        try shared.identifier(ctx, repo),
+        try shared.muted(ctx, shared.shortSha(old_sha)),
+        ctx.style.arrow(),
+        try shared.muted(ctx, shared.shortSha(new_sha)),
+    });
 }
 
 //

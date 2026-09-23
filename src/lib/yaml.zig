@@ -695,11 +695,11 @@ pub fn parseOrFail(allocator: std.mem.Allocator, text: []const u8, description: 
         error.OutOfMemory => error.OutOfMemory,
         error.Syntax => {
             if (err) |detail| {
-                return fail.set("{s} is not valid YAML: {s} at line {d}, column {d}", .{
+                return fail.set("{s} is not valid YAML: {s} at line {d}, column {d}.", .{
                     description, detail.message, detail.line, detail.column,
                 });
             }
-            return fail.set("{s} is not valid YAML", .{description});
+            return fail.set("{s} is not valid YAML.", .{description});
         },
     };
 }

@@ -198,7 +198,7 @@ test "add --from errors when skl.yaml is missing" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 }
 
@@ -241,7 +241,7 @@ test "add without config errors with the missing-config message" {
 
     const ctx = scenario.context();
     try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
-    try testing.expectEqualStrings("no skl.yaml; run skl init", scenario.fail.text());
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
 }
 
 test "add --branch writes branch in YAML and clone argv includes --branch" {

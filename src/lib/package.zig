@@ -90,14 +90,14 @@ pub fn scan(io: std.Io, allocator: std.mem.Allocator, pkg_root: []const u8, fail
     }
 
     skills_dir = openTree(io, skills_path) catch |err| {
-        return fail.set("cannot open {s}: {s}", .{ skills_path, files.describeError(err) });
+        return fail.set("Cannot open {s}: {s}.", .{ skills_path, files.describeError(err) });
     };
     commands_dir = openTree(io, commands_path) catch |err| {
-        return fail.set("cannot open {s}: {s}", .{ commands_path, files.describeError(err) });
+        return fail.set("Cannot open {s}: {s}.", .{ commands_path, files.describeError(err) });
     };
 
     if (skills_dir == null and commands_dir == null) {
-        return fail.set("package at {s} has no skills/ or commands/ directory", .{pkg_root});
+        return fail.set("Package at {s} has no skills/ or commands/ directory.", .{pkg_root});
     }
 
     var items: std.ArrayList(Item) = .empty;
@@ -125,7 +125,7 @@ pub fn readmeDescription(io: std.Io, allocator: std.mem.Allocator, pkg_root: []c
         const path = try files.joinPath(allocator, &.{ pkg_root, name });
         const text = files.readFile(io, allocator, path) catch |err| switch (err) {
             error.FileNotFound => continue,
-            else => return fail.set("cannot read {s}: {s}", .{ path, files.describeError(err) }),
+            else => return fail.set("Cannot read {s}: {s}.", .{ path, files.describeError(err) }),
         };
         return try frontmatter.extract(allocator, text);
     }
@@ -155,7 +155,7 @@ fn scanSkills(
 ) failure.Error!void {
     var it = dir.iterate();
     while (it.next(io) catch |err| {
-        return fail.set("cannot read {s}: {s}", .{ pkg_root, files.describeError(err) });
+        return fail.set("Cannot read {s}: {s}.", .{ pkg_root, files.describeError(err) });
     }) |entry| {
         if (entry.kind != .directory) {
             continue;
@@ -170,7 +170,7 @@ fn scanSkills(
             continue;
         }
         const text = files.readFile(io, allocator, full_path) catch |err| {
-            return fail.set("cannot read {s}: {s}", .{ full_path, files.describeError(err) });
+            return fail.set("Cannot read {s}: {s}.", .{ full_path, files.describeError(err) });
         };
         try items.append(allocator, .{
             .kind = .skill,
@@ -199,7 +199,7 @@ fn scanCommands(
     }
 
     while (walker.next(io) catch |err| {
-        return fail.set("cannot read {s}: {s}", .{ pkg_root, files.describeError(err) });
+        return fail.set("Cannot read {s}: {s}.", .{ pkg_root, files.describeError(err) });
     }) |entry| {
         if (entry.kind == .directory) {
             continue;
@@ -209,7 +209,7 @@ fn scanCommands(
         }
         const posix = try posixPath(allocator, entry.path);
         const text = entry.dir.readFileAlloc(io, entry.basename, allocator, .limited(files.MAX_FILE_BYTES)) catch |err| {
-            return fail.set("cannot read {s}: {s}", .{ posix, files.describeError(err) });
+            return fail.set("Cannot read {s}: {s}.", .{ posix, files.describeError(err) });
         };
         try items.append(allocator, .{
             .kind = .command,

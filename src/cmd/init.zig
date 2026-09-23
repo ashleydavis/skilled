@@ -70,17 +70,17 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     const scope = try shared.scopeOf(ctx, args.global);
     if (!files.fileExists(ctx.io, scope.config_path)) {
         try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = &.{} }, ctx.fail);
-        try shared.line(ctx, "wrote {s}", .{scope.config_path});
+        try shared.line(ctx, "Wrote {s}.", .{try shared.muted(ctx, scope.config_path)});
         try shared.syncScratch(ctx, scope);
         return 0;
     }
     const file = try config.readFile(ctx.io, ctx.allocator, scope.config_path, ctx.fail);
     if (file.packages.len == 0) {
-        try shared.line(ctx, "{s} already exists", .{scope.config_path});
+        try shared.line(ctx, "Config already exists at {s}.", .{try shared.muted(ctx, scope.config_path)});
         try shared.syncScratch(ctx, scope);
         return 0;
     }
-    try shared.line(ctx, "{s} already lists packages; not overwritten", .{scope.config_path});
+    try shared.line(ctx, "Config at {s} already lists packages; it was not overwritten.", .{try shared.muted(ctx, scope.config_path)});
     try shared.syncScratch(ctx, scope);
     return 0;
 }
@@ -103,12 +103,12 @@ fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.
     if (files.fileExists(ctx.io, scope.config_path)) {
         const existing = try config.readFile(ctx.io, ctx.allocator, scope.config_path, ctx.fail);
         if (existing.packages.len != 0) {
-            return ctx.fail.set("{s} already lists packages; use skl add --from", .{scope.config_path});
+            return ctx.fail.set("Config at {s} already lists packages; use skl add --from.", .{scope.config_path});
         }
     }
     const fetched = try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec, ctx.fail);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, fetched, ctx.fail);
-    try shared.line(ctx, "wrote {s}", .{scope.config_path});
+    try shared.line(ctx, "Wrote {s}.", .{try shared.muted(ctx, scope.config_path)});
     try shared.syncScratch(ctx, scope);
     return shared.installAll(ctx, scope, fetched);
 }

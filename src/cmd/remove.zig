@@ -66,7 +66,7 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
 
     const remaining = try dropIndex(ctx.allocator, file.packages, matched.index);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = remaining }, ctx.fail);
-    try shared.line(ctx, "{s} removed {s}", .{ ctx.style.check(), matched.pkg.repo });
+    try shared.line(ctx, "{s} Removed {s}.", .{ ctx.style.check(), try shared.identifier(ctx, matched.pkg.repo) });
     return 0;
 }
 
@@ -102,7 +102,7 @@ fn dropIndex(allocator: std.mem.Allocator, packages: []const config.Package, ind
 fn action(invocation: *commander.Invocation) anyerror!void {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
     if (invocation.args.len == 0) {
-        return ctx.fail.set("remove requires a query", .{});
+        return ctx.fail.set("The remove command requires a query.", .{});
     }
     invocation.exit_code = try run(ctx, .{
         .global = invocation.option("global") != null,
