@@ -75,7 +75,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
 
     //
-    // The release build: an optimised binary at the path the smoke tests look for.
+    // The release build: an optimised binary at the path the smoke tests look for. ReleaseSafe
+    // rather than ReleaseFast so bounds and overflow checks stay on while parsing YAML and markdown
+    // from packages.
     //
     // `scripts/smoke-tests.sh --binary` runs bin/<arch>/<os>/skl. Building to it here is what
     // lets that script find the binary without extra install flags.
@@ -83,12 +85,12 @@ pub fn build(b: *std.Build) void {
     const release_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = .ReleaseSafe,
     });
     release_mod.addImport("skilled", b.addModule("skilled-release", .{
         .root_source_file = b.path("src/lib/lib.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = .ReleaseSafe,
     }));
 
     const release_exe = b.addExecutable(.{

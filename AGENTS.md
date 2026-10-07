@@ -59,6 +59,8 @@ Not `if (slice.len == 0) return null;`. An `if` used as a value (`return if (ico
 
 ## Tests
 
+When asked to run all the tests, check the tests pass, or test everything, run `./scripts/test-everything.sh`. It builds, runs the unit tests, then runs the smoke tests, using the Zig pinned in `mise.toml`. Do not run those steps separately by hand.
+
 Tests never live in the file they test. `src/lib/config.zig` is tested by `src/lib/config.test.zig`, beside it. Not idiomatic Zig, and deliberate: with tests inline, a diff of a code file does not say whether the code changed or only its tests did.
 
 Nothing imports a `.test.zig` file, so the code file has to name it at the bottom, and that block is the only test wiring a code file holds:
