@@ -43,6 +43,14 @@ const Failure = failure.Failure;
 const Value = value.Value;
 
 //
+// The branch a row without `branch:` is cloned from and updated on.
+//
+// Named rather than left to the remote's default so a row always says which branch it follows, and
+// a row without `branch:` shares its store clone with a `branch: main` row.
+//
+pub const default_branch = "main";
+
+//
 // One package entry in skl.yaml: where to clone from, and the namespace it links under.
 //
 // A list of these, not a map keyed by name, is what lets the same repo appear twice under
@@ -61,7 +69,7 @@ pub const Package = struct {
     namespace: []const u8,
 
     //
-    // Named remote branch to clone or check out. Null means the remote's default branch.
+    // Named remote branch to clone. Null means `default_branch`.
     //
     // Mutually exclusive with `local` in a parsed document so install has one source.
     //

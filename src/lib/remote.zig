@@ -90,7 +90,7 @@ pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) 
 //
 // `--branch` names: same per-segment rule as validateName, with `/` allowed between segments.
 //
-// Pub so clone, checkout, and `--branch` share one check: a dash-prefixed name cannot become a git
+// Pub so clone, the store path, and `--branch` share one check: a dash-prefixed name cannot become a git
 // flag, and `feature/foo` is accepted.
 //
 pub fn validateBranch(name: []const u8, fail: *failure.Failure) failure.Error!void {

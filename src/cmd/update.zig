@@ -25,7 +25,7 @@ const commander = skilled.commander;
 const config = skilled.config;
 
 //
-// fetchUpdate, checkout, and HEAD, via the injected runner.
+// fetchUpdate and HEAD, via the injected runner.
 //
 const git = skilled.git;
 
@@ -144,7 +144,7 @@ fn updateOne(ctx: *const Context, scope: skilled.paths.Scope, pkg: skilled.confi
         return;
     }
 
-    const resolved = try shared.resolveStore(ctx, pkg.repo);
+    const resolved = try shared.resolveStore(ctx, pkg.repo, pkg.branch);
     if (!shared.dirExists(ctx.io, resolved.dest)) {
         return ctx.fail.set("Package {s} is not installed; run skl install.", .{pkg.repo});
     }
@@ -181,7 +181,11 @@ fn switchToLocal(
 }
 
 //
-// Clears `local`, writes `branch`, clones or checks out, and relinks at the store dest.
+// Clears `local`, writes `branch`, clones that branch's store dest if missing, and relinks at it.
+//
+// The links to the row's previous source are removed first. That source is another directory (the
+// local tree or another branch's clone), so linkPackage alone would leave a link the new branch's
+// layout does not use.
 //
 fn switchToBranch(
     ctx: *const Context,
@@ -190,10 +194,9 @@ fn switchToBranch(
     matched: shared.Match,
     branch: []const u8,
 ) skilled.failure.Error!void {
-    const resolved_store = try shared.resolveStore(ctx, matched.pkg.repo);
-    const dest_existed = shared.dirExists(ctx.io, resolved_store.dest);
-    const old_sha: ?[]const u8 = if (dest_existed)
-        try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved_store.dest, ctx.fail)
+    const old_dest = try shared.contentDir(ctx, matched.pkg);
+    const old_sha: ?[]const u8 = if (shared.dirExists(ctx.io, old_dest))
+        try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, old_dest, ctx.fail)
     else
         null;
 
@@ -207,6 +210,7 @@ fn switchToBranch(
     pkg.local = null;
     const rewritten = try replacePackage(ctx.allocator, file, matched.index, pkg);
     try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten, ctx.fail);
+    try link.unlinkPackage(ctx.io, ctx.allocator, old_dest, pkg.namespace, scope, ctx.fail);
     _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
 
     const new_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);

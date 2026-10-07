@@ -547,9 +547,10 @@ setup_cli() {
     fi
 }
 
-# Branch the store clone of acme/skills is checked out on.
+# Branch a store clone of acme/skills is checked out on. With no argument, the clone a row without
+# `branch:` uses (main); with a branch name, that branch's own clone.
 store_branch() {
-    git -C "$STORE/github.com/acme/skills" rev-parse --abbrev-ref HEAD
+    git -C "$STORE/github.com/acme/skills@${1:-main}" rev-parse --abbrev-ref HEAD
 }
 
 # A skill and a command inside this scenario's project scratch directory.
@@ -700,8 +701,8 @@ sc12() {
     assert_file_contains "$CWD/skl.yaml" "namespace: demo"
     assert_file_contains "$CWD/skl.yaml" "acme/cmds"
     assert_file_contains "$CWD/skl.yaml" "namespace: cmd"
-    assert_not_exists "$STORE/github.com/acme/skl-config"
-    assert_dir_exists "$STORE/github.com/acme/skills"
+    assert_not_exists "$STORE/github.com/acme/skl-config@main"
+    assert_dir_exists "$STORE/github.com/acme/skills@main"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
     assert_symlink "$CWD/.claude/commands/demo" "github.com/acme/skills"
     assert_symlink "$CWD/.cursor/commands/cmd" "github.com/acme/cmds"
@@ -715,7 +716,7 @@ sc13() {
     assert_file_contains "$GLOBAL_YAML" "acme/skills"
     assert_file_contains "$GLOBAL_YAML" "namespace: demo"
     assert_file_contains "$GLOBAL_YAML" "acme/cmds"
-    assert_not_exists "$STORE/github.com/acme/skl-config"
+    assert_not_exists "$STORE/github.com/acme/skl-config@main"
 }
 
 sc14() {
@@ -725,7 +726,7 @@ sc14() {
     assert_exit 0
     assert_file_contains "$CWD/skl.yaml" "acme/skills"
     assert_file_contains "$CWD/skl.yaml" "acme/cmds"
-    assert_not_exists "$STORE/github.com/acme/skl-config"
+    assert_not_exists "$STORE/github.com/acme/skl-config@main"
 }
 
 sc47() {
@@ -753,8 +754,8 @@ sc15() {
     setup_cli init
     run_cli_in "$CWD" add acme/skills --ns demo
     assert_exit 0
-    assert_dir_exists "$STORE/github.com/acme/skills"
-    assert_file_exists "$STORE/github.com/acme/skills/skills/demo/SKILL.md"
+    assert_dir_exists "$STORE/github.com/acme/skills@main"
+    assert_file_exists "$STORE/github.com/acme/skills@main/skills/demo/SKILL.md"
     assert_file_contains "$CWD/skl.yaml" "acme/skills"
     assert_file_contains "$CWD/skl.yaml" "namespace: demo"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
@@ -799,7 +800,7 @@ sc19() {
     setup_cli init
     run_cli_in "$CWD" add git@github.example.com:acme/skills.git --ns ent
     assert_exit 0
-    assert_dir_exists "$STORE/github.example.com/acme/skills"
+    assert_dir_exists "$STORE/github.example.com/acme/skills@main"
     assert_file_contains "$CWD/skl.yaml" "github.example.com"
 }
 
@@ -895,7 +896,7 @@ sc26() {
     assert_not_exists "$CWD/.cursor/skills/demo"
     assert_not_exists "$CWD/.claude/commands/demo"
     assert_file_lacks "$CWD/skl.yaml" "namespace: demo"
-    assert_dir_exists "$STORE/github.com/acme/skills"
+    assert_dir_exists "$STORE/github.com/acme/skills@main"
 }
 
 sc27() {
@@ -949,13 +950,13 @@ sc31() {
     setup_cli init
     setup_cli add acme/skills --ns demo
     local old_sha new_sha
-    old_sha="$(cat "$STORE/github.com/acme/skills/.git/refs/heads/main")"
+    old_sha="$(cat "$STORE/github.com/acme/skills@main/.git/refs/heads/main")"
     printf '\nextra line\n' >>"$REMOTE_SKILLS/README.md"
     fixture_git "$REMOTE_SKILLS" add README.md
     fixture_git "$REMOTE_SKILLS" commit --quiet -m "extra"
     run_cli_in "$CWD" update demo
     assert_exit 0
-    new_sha="$(cat "$STORE/github.com/acme/skills/.git/refs/heads/main")"
+    new_sha="$(cat "$STORE/github.com/acme/skills@main/.git/refs/heads/main")"
     if [ "$old_sha" = "$new_sha" ]; then
         fail "store HEAD did not move after update"
     else
@@ -964,7 +965,7 @@ sc31() {
     assert_output_contains "${old_sha:0:7}"
     assert_output_contains "${new_sha:0:7}"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
-    assert_file_contains "$STORE/github.com/acme/skills/README.md" "extra line"
+    assert_file_contains "$STORE/github.com/acme/skills@main/README.md" "extra line"
 }
 
 sc32() {
@@ -1102,7 +1103,7 @@ sc42() {
     fi
     run_cli_in "$CWD" add acme/skills --ns demo
     assert_exit 0
-    assert_dir_exists "$STORE/github.com/acme/skills"
+    assert_dir_exists "$STORE/github.com/acme/skills@main"
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
 }
 
@@ -1133,7 +1134,7 @@ sc45() {
     assert_exit 0
     assert_file_contains "$CWD/skl.yaml" "acme/skills"
     assert_file_contains "$CWD/skl.yaml" "acme/cmds"
-    assert_not_exists "$STORE/github.com/acme/skl-config"
+    assert_not_exists "$STORE/github.com/acme/skl-config@main"
     assert_not_exists "$CWD/.cursor/skills/demo"
 }
 
@@ -1162,10 +1163,10 @@ sc48() {
     assert_file_contains "$CWD/skl.yaml" "acme/skills"
     assert_file_contains "$CWD/skl.yaml" "branch: dev"
     assert_file_lacks "$CWD/skl.yaml" "local:"
-    if [ "$(store_branch)" = "dev" ]; then
+    if [ "$(store_branch dev)" = "dev" ]; then
         pass "store HEAD is dev"
     else
-        fail "expected store HEAD to be dev, got $(store_branch)"
+        fail "expected store HEAD to be dev, got $(store_branch dev)"
     fi
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
     run_cli_in "$CWD" list
@@ -1179,10 +1180,10 @@ sc49() {
     setup_cli add acme/skills --ns demo --branch dev
     run_cli_in "$CWD" install
     assert_exit 0
-    if [ "$(store_branch)" = "dev" ]; then
+    if [ "$(store_branch dev)" = "dev" ]; then
         pass "store HEAD is still dev"
     else
-        fail "expected store HEAD to stay dev, got $(store_branch)"
+        fail "expected store HEAD to stay dev, got $(store_branch dev)"
     fi
     assert_file_contains "$CWD/skl.yaml" "branch: dev"
 }
@@ -1195,10 +1196,10 @@ sc50() {
     assert_exit 0
     assert_file_contains "$CWD/skl.yaml" "branch: main"
     assert_file_lacks "$CWD/skl.yaml" "local:"
-    if [ "$(store_branch)" = "main" ]; then
+    if [ "$(store_branch main)" = "main" ]; then
         pass "store HEAD is main"
     else
-        fail "expected store HEAD to be main, got $(store_branch)"
+        fail "expected store HEAD to be main, got $(store_branch main)"
     fi
     assert_symlink "$CWD/.cursor/skills/demo" "github.com/acme/skills"
 }
@@ -1458,6 +1459,78 @@ sc73() {
 
 ####################################################################################################
 #
+# 74–75: one store clone per branch.
+#
+####################################################################################################
+
+sc74() {
+    scenario_env
+    setup_cli -g init
+    setup_cli -g add acme/skills --ns demo
+    setup_cli init
+    setup_cli add acme/skills --ns feature --branch dev
+    run_cli_in "$CWD" -g list
+    assert_exit 0
+    assert_output_contains "Says hello"
+    assert_output_lacks "Hello from dev"
+    if [ "$(store_branch)" = "main" ]; then
+        pass "default store clone is still on main"
+    else
+        fail "expected the default store clone to stay on main, got $(store_branch)"
+    fi
+}
+
+sc75() {
+    scenario_env
+    setup_cli -g init
+    setup_cli -g add acme/skills --ns demo
+    setup_cli init
+    setup_cli add acme/skills --ns feature --branch dev
+    local default_dir="$STORE/github.com/acme/skills@main"
+    local dev_dir="$STORE/github.com/acme/skills@dev"
+    local default_before dev_before
+    default_before="$(git -C "$default_dir" rev-parse HEAD)"
+    dev_before="$(git -C "$dev_dir" rev-parse HEAD)"
+
+    fixture_git "$REMOTE_SKILLS" checkout --quiet dev
+    printf '\nnew on dev\n' >>"$REMOTE_SKILLS/README.md"
+    fixture_git "$REMOTE_SKILLS" add README.md
+    fixture_git "$REMOTE_SKILLS" commit --quiet -m "dev update"
+    fixture_git "$REMOTE_SKILLS" checkout --quiet main
+
+    run_cli_in "$CWD" update feature
+    assert_exit 0
+    if [ "$(git -C "$dev_dir" rev-parse HEAD)" = "$(git -C "$REMOTE_SKILLS" rev-parse dev)" ]; then
+        pass "dev clone moved to the latest dev commit"
+    else
+        fail "dev clone did not move to the latest dev commit"
+    fi
+    if [ "$(git -C "$dev_dir" rev-parse HEAD)" != "$dev_before" ]; then
+        pass "dev clone HEAD changed"
+    else
+        fail "dev clone HEAD did not change"
+    fi
+    if [ "$(git -C "$default_dir" rev-parse HEAD)" = "$default_before" ]; then
+        pass "default clone was left alone"
+    else
+        fail "default clone moved when only dev was updated"
+    fi
+
+    printf '\nnew on main\n' >>"$REMOTE_SKILLS/README.md"
+    fixture_git "$REMOTE_SKILLS" add README.md
+    fixture_git "$REMOTE_SKILLS" commit --quiet -m "main update"
+
+    run_cli_in "$CWD" -g update demo
+    assert_exit 0
+    if [ "$(git -C "$default_dir" rev-parse HEAD)" = "$(git -C "$REMOTE_SKILLS" rev-parse main)" ]; then
+        pass "default clone moved to the latest main commit"
+    else
+        fail "default clone did not move to the latest main commit"
+    fi
+}
+
+####################################################################################################
+#
 # The driver.
 #
 # Scenarios are independent, so they run in lanes: --jobs lanes pull from one shared queue, and a
@@ -1544,6 +1617,8 @@ SCENARIOS=(
     "sc71|71. init -g links the scratch directory under HOME, leaving the project one alone"
     "sc72|72. a skl.yaml that names the scratch namespace is a parse error"
     "sc73|73. a real file at a scratch link path fails install and is not overwritten"
+    "sc74|74. a project's branch row does not change what the global scope links to"
+    "sc75|75. update moves each branch's clone to that branch's latest commit"
 )
 
 #

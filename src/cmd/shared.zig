@@ -108,9 +108,16 @@ pub const Resolved = struct {
     parsed: remote.Remote,
 
     //
-    // `<store>/<host>/<owner>/<repo>`.
+    // `<store>/<host>/<owner>/<repo>@<branch>`.
     //
     dest: []const u8,
+
+    //
+    // The branch dest is a clone of: the row's `branch`, or `config.default_branch` when it has none.
+    //
+    // Held here so the clone and the directory name cannot disagree about which branch it is.
+    //
+    branch: []const u8,
 };
 
 //
@@ -146,26 +153,27 @@ pub fn requireConfig(ctx: *const Context, config_path: []const u8) skilled.failu
 }
 
 //
-// Parses a YAML repo spec and joins it onto the store root.
+// Parses a YAML repo spec and joins it, with its branch, onto the store root.
 //
-pub fn resolveStore(ctx: *const Context, spec: []const u8) skilled.failure.Error!Resolved {
+// A null branch is `config.default_branch`. The branch is validated here, before it becomes part
+// of a directory name, so a YAML row cannot name a path outside the store.
+//
+pub fn resolveStore(ctx: *const Context, spec: []const u8, branch: ?[]const u8) skilled.failure.Error!Resolved {
     const parsed = try remote.parse(ctx.allocator, spec, ctx.fail);
-    const dest = try paths.clonePath(ctx.allocator, try storeDir(ctx), parsed.host, parsed.owner, parsed.repo);
-    return .{ .parsed = parsed, .dest = dest, .cloned = false };
+    const name = branch orelse config.default_branch;
+    try remote.validateBranch(name, ctx.fail);
+    const dest = try paths.clonePath(ctx.allocator, try storeDir(ctx), parsed.host, parsed.owner, parsed.repo, name);
+    return .{ .parsed = parsed, .dest = dest, .branch = name, .cloned = false };
 }
 
 //
-// Clones into the store when dest is missing. An existing dest is reused (global and project share
-// the store). When `branch` is set and dest already exists, the clone is checked out onto that
-// branch. Progress is drawn only for an actual clone.
+// Clones into the store when dest is missing. An existing dest is reused: every scope that names
+// the same repo and branch shares it, and it is already on that branch because each branch has its
+// own clone. Progress is drawn only for an actual clone.
 //
 pub fn ensureCloned(ctx: *const Context, spec: []const u8, branch: ?[]const u8, spinner: *progress.Progress) skilled.failure.Error!Resolved {
-    var resolved = try resolveStore(ctx, spec);
+    var resolved = try resolveStore(ctx, spec, branch);
     if (dirExists(ctx.io, resolved.dest)) {
-        if (branch) |name| {
-            try git.checkoutBranch(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, name, ctx.fail);
-            resolved.cloned = true;
-        }
         return resolved;
     }
     spinner.cloning(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ resolved.parsed.owner, resolved.parsed.repo }));
@@ -176,7 +184,7 @@ pub fn ensureCloned(ctx: *const Context, spec: []const u8, branch: ?[]const u8, 
         ctx.git,
         resolved.parsed.clone_url,
         resolved.dest,
-        branch,
+        resolved.branch,
         ctx.fail,
     ) catch |err| {
         spinner.finish();
@@ -194,7 +202,7 @@ pub fn contentDir(ctx: *const Context, pkg: config.Package) skilled.failure.Erro
     if (pkg.local) |local| {
         return files.absolutePath(ctx.allocator, ctx.cwd, local);
     }
-    const resolved = try resolveStore(ctx, pkg.repo);
+    const resolved = try resolveStore(ctx, pkg.repo, pkg.branch);
     return resolved.dest;
 }
 

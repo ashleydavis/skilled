@@ -2,9 +2,7 @@
 
 ## Layers
 
-1. **Store** — clones live under `~/.skilled/store/<host>/<owner>/<repo>/`.
-   That path is on purpose: v1 does not honour `XDG_DATA_HOME`. Hostnames such
-   as `github.com` are ordinary directory names.
+1. **Store** — clones live under `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, one per repo and branch (`/` in the branch written as `+`). A row without `branch:` uses `main`. That path is on purpose: v1 does not honour `XDG_DATA_HOME`. Hostnames such as `github.com` are ordinary directory names.
 2. **YAML** — user intent (`skl.yaml` in the active scope).
 3. **Symlinks** — each package namespace under Cursor and Claude skill/command
    dirs, plus the scratch directory under the reserved namespace `loc`.
@@ -103,16 +101,12 @@ packages:
 URL. `repo` and `namespace` are required. `branch` and `local` are optional;
 omit a field when it is unset. A row may have `branch` or `local`, not both.
 
-The store path is always `~/.skilled/store/<host>/<owner>/<repo>/`. `local`
+The store path is `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, with `main` as the branch when the row has none. `local`
 does not replace that path; it is the directory agent symlinks point at.
 `skl add --local` and `skl update --local` store an absolute path (relative
 `--local` is resolved against the current working directory).
 
-`skl install` (and `init --from` after writing YAML) uses those fields: a
-`branch:` row is cloned with `--branch` when the store dest is missing, or
-checked out onto that branch when the dest already exists. A `local:` row is
-not cloned; the path is scanned and linked (an error if it is missing or not a
-valid package).
+`skl install` (and `init --from` after writing YAML) uses those fields: each row is cloned with `--branch` (its `branch:`, or `main`) into its own store directory when that directory is missing, and reused when it exists. Every scope naming the same repo and branch shares that clone, and no other branch's row touches it. `skl update` fast-forwards each clone to the latest commit on its own branch. A `local:` row is not cloned; the path is scanned and linked (an error if it is missing or not a valid package).
 
 Namespaces are unique per config file, and `loc` is reserved for the scratch
 directory.

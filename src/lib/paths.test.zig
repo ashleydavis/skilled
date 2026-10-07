@@ -125,14 +125,14 @@ test "storeDir is home/.skilled/store and ignores XDG_DATA_HOME" {
     try testing.expect(std.mem.indexOf(u8, store_dir, "xdg") == null);
 }
 
-test "clonePath joins store/host/owner/repo for github.com" {
+test "clonePath joins store/host/owner/repo@branch for github.com" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
     const store_dir = try paths.storeDir(allocator, fake_home);
-    const got = try paths.clonePath(allocator, store_dir, "github.com", "acme", "skills");
-    const expected = try files.joinPath(allocator, &.{ store_dir, "github.com", "acme", "skills" });
+    const got = try paths.clonePath(allocator, store_dir, "github.com", "acme", "skills", "main");
+    const expected = try files.joinPath(allocator, &.{ store_dir, "github.com", "acme", "skills@main" });
     try testing.expectEqualStrings(expected, got);
 }
 
@@ -142,8 +142,30 @@ test "clonePath keeps a dotted host as one directory name" {
     const allocator = arena.allocator();
 
     const store_dir = try paths.storeDir(allocator, fake_home);
-    const got = try paths.clonePath(allocator, store_dir, "github.example.com", "acme", "skills");
-    const expected = try files.joinPath(allocator, &.{ store_dir, "github.example.com", "acme", "skills" });
+    const got = try paths.clonePath(allocator, store_dir, "github.example.com", "acme", "skills", "main");
+    const expected = try files.joinPath(allocator, &.{ store_dir, "github.example.com", "acme", "skills@main" });
+    try testing.expectEqualStrings(expected, got);
+}
+
+test "clonePath gives each branch its own directory" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const store_dir = try paths.storeDir(allocator, fake_home);
+    const got = try paths.clonePath(allocator, store_dir, "github.com", "acme", "skills", "dev");
+    const expected = try files.joinPath(allocator, &.{ store_dir, "github.com", "acme", "skills@dev" });
+    try testing.expectEqualStrings(expected, got);
+}
+
+test "clonePath keeps a branch with a slash as one directory name" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const store_dir = try paths.storeDir(allocator, fake_home);
+    const got = try paths.clonePath(allocator, store_dir, "github.com", "acme", "skills", "feature/foo");
+    const expected = try files.joinPath(allocator, &.{ store_dir, "github.com", "acme", "skills@feature+foo" });
     try testing.expectEqualStrings(expected, got);
 }
 

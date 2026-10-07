@@ -25,7 +25,7 @@ test "remove unlinks and drops the YAML entry, leaving the store clone" {
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 
     const dest = try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skills", "skills/hello/SKILL.md",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@main", "skills/hello/SKILL.md",
     });
     try testing.expect(skilled.files.fileExists(scenario.io(), dest));
 

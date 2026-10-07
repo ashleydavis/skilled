@@ -97,7 +97,7 @@ test "add clones, appends YAML, and links" {
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: demo") != null);
 
     const dest = try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skills",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@main",
     });
     try testing.expect(skilled.files.fileExists(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ dest, "skills/hello/SKILL.md" })));
 
@@ -123,7 +123,7 @@ test "add --from after init appends packages and does not clone skill packages" 
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: cmd") != null);
 
     try testing.expect(!pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skills",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@main",
     })));
     try testing.expect(!pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.cwd, ".cursor", "skills", "demo",

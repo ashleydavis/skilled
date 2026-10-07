@@ -123,8 +123,7 @@ packages.
 mutually exclusive on one invocation. A YAML row may have `branch` or `local`,
 not both. `repo` stays required so `update --branch` can clone the remote later.
 
-`skl add <repo> --ns <ns> --branch <name>` clones that branch into the store,
-writes `branch:` on the YAML row, and links agent dirs at the store clone.
+`skl add <repo> --ns <ns> --branch <name>` clones that branch into its own store directory (`<repo>@<branch>`), writes `branch:` on the YAML row, and links agent dirs at that clone. Without `--branch` the row follows `main` and uses `<repo>@main`. Each branch is a separate directory, so a branch row in one scope never changes what another scope links to. `skl update` fast-forwards each branch's clone to the latest commit on that branch.
 
 `skl add <repo> --ns <ns> --local <path>` does not clone. It scans `<path>`
 (a git working tree that is a valid package), writes an **absolute** `local:`
@@ -132,9 +131,7 @@ on the YAML row (relative paths are resolved against the current working
 directory), and links agent dirs at that path. Edits in the working tree show
 up without `update`. `<repo>` is still required.
 
-`skl update <query> --branch <name>` requires a package query. Clears `local`,
-sets `branch`, clones the store dest if it is missing, checks that branch out
-with upstream tracking, and relinks agent dirs at the store.
+`skl update <query> --branch <name>` requires a package query. Clears `local`, sets `branch`, clones that branch's store directory if it is missing, removes the links to the row's previous source, and links agent dirs at the branch's clone. The previous clone is left in place.
 
 `skl update <query> --local <path>` requires a package query. Sets `local` to
 the resolved absolute path, clears `branch`, and relinks agent dirs at that

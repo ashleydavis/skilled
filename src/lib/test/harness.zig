@@ -504,12 +504,6 @@ fn runGit(
         }
         return cloneReply(self, io, allocator, argv, fail);
     }
-    if (std.mem.eql(u8, argv[1], "checkout")) {
-        if (branchFromCheckout(argv)) |name| {
-            self.branch = try self.allocator.dupe(u8, name);
-        }
-        return ok(allocator);
-    }
     if (std.mem.eql(u8, argv[1], "rev-parse")) {
         return revParseReply(self, allocator, argv, fail);
     }
@@ -561,7 +555,7 @@ fn cloneReply(
         return fail.set("scripted git clone: missing dest", .{});
     }
     const dest = argv[argv.len - 1];
-    const repo = lastSegment(dest);
+    const repo = repoFromDest(dest);
     if (nameIs(self.fail_repo, repo)) {
         return fail.set("scripted git clone failed for {s}", .{repo});
     }
@@ -755,30 +749,23 @@ fn branchFromClone(argv: []const []const u8) ?[]const u8 {
 }
 
 //
-// Branch after `-B` in `git checkout --track -B <branch> origin/<branch>`.
+// The repo name a clone dest is for: its last path segment, without the `@<branch>` a store clone
+// carries. A `--from` throwaway clone has no `@`, so its last segment is the repo name as it is.
 //
-fn branchFromCheckout(argv: []const []const u8) ?[]const u8 {
-    var i: usize = 0;
-    while (i + 1 < argv.len) : (i += 1) {
-        if (std.mem.eql(u8, argv[i], "-B")) {
-            return argv[i + 1];
-        }
-    }
-    return null;
-}
-
-//
-// Last path segment of dest, which is the repo directory name.
-//
-fn lastSegment(path: []const u8) []const u8 {
+fn repoFromDest(path: []const u8) []const u8 {
     var i = path.len;
+    var segment = path;
     while (i > 0) {
         i -= 1;
         if (path[i] == '/' or path[i] == '\\') {
-            return path[i + 1 ..];
+            segment = path[i + 1 ..];
+            break;
         }
     }
-    return path;
+    if (std.mem.indexOfScalar(u8, segment, '@')) |at| {
+        return segment[0..at];
+    }
+    return segment;
 }
 
 //

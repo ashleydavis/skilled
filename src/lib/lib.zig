@@ -71,7 +71,7 @@ pub const frontmatter = @import("frontmatter.zig");
 pub const package = @import("package.zig");
 
 //
-// Clone, show, fetch, checkout, and HEAD in the git store, via argv-array spawns.
+// Clone, show, fetch, and HEAD in the git store, via argv-array spawns.
 //
 pub const git = @import("git.zig");
 

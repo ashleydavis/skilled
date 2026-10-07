@@ -159,10 +159,10 @@ fn expectFromInstalledPackages(scenario: *harness.Scenario) !void {
     try testing.expect(std.mem.indexOf(u8, dest, ".skilled") == null);
     try testing.expect(!pathExists(scenario, dest));
     try testing.expect(!pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skl-config",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skl-config@main",
     })));
     try testing.expect(pathExists(scenario, try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skills",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@main",
     })));
     const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
     const commands_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "commands", "cmd" });

@@ -22,7 +22,7 @@ test "contentDir with local returns that path" {
     try testing.expectEqualStrings(local, dest);
 }
 
-test "contentDir without local returns the store dest" {
+test "contentDir without local or branch returns the default branch store dest" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
@@ -32,7 +32,23 @@ test "contentDir without local returns the store dest" {
         .namespace = "demo",
     });
     const expected = try skilled.files.joinPath(scenario.allocator(), &.{
-        scenario.home, ".skilled", "store", "github.com", "acme", "skills",
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@main",
+    });
+    try testing.expectEqualStrings(expected, dest);
+}
+
+test "contentDir with a branch returns that branch's store dest" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    const dest = try shared.contentDir(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "dev",
+    });
+    const expected = try skilled.files.joinPath(scenario.allocator(), &.{
+        scenario.home, ".skilled", "store", "github.com", "acme", "skills@dev",
     });
     try testing.expectEqualStrings(expected, dest);
 }
@@ -75,17 +91,17 @@ test "resolveLocal errors on a git dir that fails package.scan" {
     try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "skills/") != null);
 }
 
-test "ensureCloned missing dest without branch has no --branch" {
+test "ensureCloned missing dest without branch clones the default branch" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const ctx = scenario.context();
     var spinner = shared.newSpinner(&ctx);
     defer spinner.finish();
-    _ = try shared.ensureCloned(&ctx, "acme/skills", null, &spinner);
+    const resolved = try shared.ensureCloned(&ctx, "acme/skills", null, &spinner);
 
-    try testing.expect(cloneHasBranch(&scenario.git, "feature") == false);
-    try testing.expect(cloneRan(&scenario.git));
+    try testing.expect(cloneHasBranch(&scenario.git, skilled.config.default_branch));
+    try testing.expectEqualStrings(skilled.config.default_branch, resolved.branch);
 }
 
 test "ensureCloned missing dest with branch includes --branch" {
@@ -100,23 +116,54 @@ test "ensureCloned missing dest with branch includes --branch" {
     try testing.expect(cloneHasBranch(&scenario.git, "feature"));
 }
 
-test "ensureCloned existing dest with branch records checkout and does not clone again" {
+test "ensureCloned with a branch clones its own dest and leaves the default clone alone" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const ctx = scenario.context();
     var first = shared.newSpinner(&ctx);
     defer first.finish();
-    _ = try shared.ensureCloned(&ctx, "acme/skills", null, &first);
+    const default_clone = try shared.ensureCloned(&ctx, "acme/skills", null, &first);
     const clones_after_first = countArgv(&scenario.git, "clone");
 
     const again = scenario.context();
     var second = shared.newSpinner(&again);
     defer second.finish();
-    _ = try shared.ensureCloned(&again, "acme/skills", "feature", &second);
+    const branch_clone = try shared.ensureCloned(&again, "acme/skills", "feature", &second);
+
+    try testing.expect(!std.mem.eql(u8, default_clone.dest, branch_clone.dest));
+    try testing.expectEqual(clones_after_first + 1, countArgv(&scenario.git, "clone"));
+    try testing.expectEqual(@as(usize, 0), countArgv(&scenario.git, "checkout"));
+}
+
+test "ensureCloned existing branch dest does not clone again" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    var first = shared.newSpinner(&ctx);
+    defer first.finish();
+    _ = try shared.ensureCloned(&ctx, "acme/skills", "feature", &first);
+    const clones_after_first = countArgv(&scenario.git, "clone");
+
+    const again = scenario.context();
+    var second = shared.newSpinner(&again);
+    defer second.finish();
+    const resolved = try shared.ensureCloned(&again, "acme/skills", "feature", &second);
 
     try testing.expectEqual(clones_after_first, countArgv(&scenario.git, "clone"));
-    try testing.expect(countArgv(&scenario.git, "checkout") >= 1);
+    try testing.expect(!resolved.cloned);
+}
+
+test "ensureCloned refuses a branch that is not a valid name" {
+    var scenario = try harness.Scenario.create();
+    defer scenario.destroy();
+
+    const ctx = scenario.context();
+    var spinner = shared.newSpinner(&ctx);
+    defer spinner.finish();
+    try testing.expectError(error.Failed, shared.ensureCloned(&ctx, "acme/skills", "../escape", &spinner));
+    try testing.expect(!cloneRan(&scenario.git));
 }
 
 //

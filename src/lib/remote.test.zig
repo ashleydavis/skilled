@@ -185,7 +185,7 @@ test "parse maps an enterprise SSH URL onto store/host/owner/repo" {
     try testing.expectEqualStrings("skills", got.repo);
 
     const store_dir = try paths.storeDir(allocator, fake_home);
-    const clone_path = try paths.clonePath(allocator, store_dir, got.host, got.owner, got.repo);
-    const expected = try files.joinPath(allocator, &.{ store_dir, "github.example.com", "acme", "skills" });
+    const clone_path = try paths.clonePath(allocator, store_dir, got.host, got.owner, got.repo, "main");
+    const expected = try files.joinPath(allocator, &.{ store_dir, "github.example.com", "acme", "skills@main" });
     try testing.expectEqualStrings(expected, clone_path);
 }

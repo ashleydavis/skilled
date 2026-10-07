@@ -121,10 +121,13 @@ pub fn storeDir(allocator: std.mem.Allocator, home_dir: []const u8) std.mem.Allo
 }
 
 //
-// The directory of one clone: `<store>/<host>/<owner>/<repo>`.
+// The directory of one clone: `<store>/<host>/<owner>/<repo>@<branch>`.
 //
 // Host is a single directory name, including dotted names like `github.example.com`, so a
-// later clone cannot split a host into nested directories.
+// later clone cannot split a host into nested directories. Each branch gets its own clone so a
+// project that names a branch cannot change the files another scope links to. `/` in the branch
+// becomes `+`, which keeps `feature/foo` one directory name and cannot appear in a valid branch
+// or repo name, so no two rows share a directory by accident.
 //
 pub fn clonePath(
     allocator: std.mem.Allocator,
@@ -132,8 +135,12 @@ pub fn clonePath(
     host: []const u8,
     owner: []const u8,
     repo: []const u8,
+    branch: []const u8,
 ) std.mem.Allocator.Error![]const u8 {
-    return files.joinPath(allocator, &.{ store_dir, host, owner, repo });
+    const dir_name = try std.fmt.allocPrint(allocator, "{s}@{s}", .{ repo, branch });
+    defer allocator.free(dir_name);
+    std.mem.replaceScalar(u8, dir_name, '/', '+');
+    return files.joinPath(allocator, &.{ store_dir, host, owner, dir_name });
 }
 
 //
