@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Refuses a commit whose tests do not pass.
+#
+# Runs ./scripts/test-everything.sh, which asks what-changed which targets have changes and runs only
+# those. A docs-only change runs nothing and the commit goes straight through.
+#
+# Git exports GIT_INDEX_FILE (and sometimes GIT_DIR) to hooks. They are unset here so the smoke tests'
+# fixture git can never be pointed at this checkout's index.
+#
+# Nothing here fixes or stages anything: it reports and refuses, leaving the working copy alone.
+#
+# Bypass with `git commit --no-verify`.
+#
+# Named without a .sh extension because git only recognises hooks by these exact filenames.
+set -uo pipefail
+
+# Asked of git, not worked out from this file's path: the hook runs through a symlink in .git/hooks.
+REPO_DIR="$(git rev-parse --show-toplevel)"
+
+unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX
+
+cd "$REPO_DIR"
+
+echo "pre-commit: running the tests for whatever changed"
+
+if ! ./scripts/test-everything.sh; then
+    echo "" >&2
+    echo "pre-commit FAILED. Commit anyway with: git commit --no-verify" >&2
+    exit 1
+fi
+
+echo "pre-commit: passed"

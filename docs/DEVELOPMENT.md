@@ -44,6 +44,10 @@ It asks [what-changed](https://github.com/ashleydavis/what-changed) which target
 ./scripts/test-everything.sh --force   # run every target
 ```
 
+### Pre-commit hook
+
+`./scripts/install-hooks.sh` enables the checked-in pre-commit hook in your clone (once per clone, no git configuration changed). The hook runs `./scripts/test-everything.sh` and refuses the commit if it fails. `git commit --no-verify` skips it.
+
 ### Unit tests
 
 ```sh
