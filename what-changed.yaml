@@ -1,0 +1,24 @@
+always:
+  - build.zig
+  - build.zig.zon
+  - mise.toml
+  - what-changed.yaml
+  - scripts
+
+ignore:
+  - .md
+  - .txt
+  - .log
+
+targets:
+  - name: compile
+    paths:
+      - src
+
+  - name: test
+    paths:
+      - src
+
+  - name: smoke
+    paths:
+      - src

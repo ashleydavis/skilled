@@ -61,7 +61,7 @@ Not `if (slice.len == 0) return null;`. An `if` used as a value (`return if (ico
 
 ## Tests
 
-When asked to run all the tests, check the tests pass, or test everything, run `./scripts/test-everything.sh`. It builds, runs the unit tests, then runs the smoke tests, using the Zig pinned in `mise.toml`. Do not run those steps separately by hand.
+When asked to run all the tests, check the tests pass, or test everything, run `./scripts/test-everything.sh`. It uses [what-changed](https://github.com/ashleydavis/what-changed) (targets in `what-changed.yaml`) to run only the targets whose watched files changed since each last passed (`compile`, `test`, `smoke`), using the tools pinned in `mise.toml`. `--force` runs every target and `--plan` prints what would run. Each target records its baseline only after it passes. A new target goes in `what-changed.yaml` and in the `case` in `scripts/test-everything.sh`. Do not run those steps separately by hand.
 
 Tests never live in the file they test. `src/lib/config.zig` is tested by `src/lib/config.test.zig`, beside it. Not idiomatic Zig, and deliberate: with tests inline, a diff of a code file does not say whether the code changed or only its tests did.
 

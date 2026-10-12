@@ -37,6 +37,13 @@ Run everything (build, unit tests, smoke tests) with:
 ./scripts/test-everything.sh
 ```
 
+It asks [what-changed](https://github.com/ashleydavis/what-changed) which targets (`compile`, `test`, `smoke`, listed in `what-changed.yaml`) have changed files since each last passed, runs only those, and records each target's baseline as it passes. Baselines live in `.what-changed/`, which is gitignored.
+
+```sh
+./scripts/test-everything.sh --plan    # print what would run, run nothing
+./scripts/test-everything.sh --force   # run every target
+```
+
 ### Unit tests
 
 ```sh

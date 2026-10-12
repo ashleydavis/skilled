@@ -2,3 +2,4 @@ zig-out/
 .zig-cache/
 bin/
 tmp/
+.what-changed/
