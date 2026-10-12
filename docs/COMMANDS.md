@@ -11,7 +11,7 @@
 | `skl add <repo>` | Clone, scan, append YAML, and link. Requires `--ns`. `--branch` clones that branch; `--local` links a working tree instead of cloning. |
 | `skl add --from <spec>` | Append packages from a YAML file in git into the existing `skl.yaml`. |
 | `skl remove <query>` | Unlink the namespace and drop that YAML entry. Leaves the store clone. |
-| `skl update [repo]` | Fast-forward store clones and repair missing links, the scratch links included. `--branch` / `--local` switch a listed package (query required). |
+| `skl update [repo]` | Fast-forward store clones and repair missing links, the scratch links included. `--branch` / `--local` switch a package already in `skl.yaml` (query required). |
 | `skl list` | Print packages and each skill/command as `ns:name`, then the scratch directory. |
 | `skl docs [package]` | Print package details and open the GitHub Pages guess. |
 
@@ -97,12 +97,12 @@ exclusive; `--ns` is not used with `--from`. Run `skl install` after `add
 
 First matching split rule wins:
 
-1. Spec starts with `https://` — GitHub UI URL; the clone is still SSH.
+1. Spec starts with `https://`: a GitHub UI URL; the clone is still SSH.
    `https://github.com/ashleydavis/skl-example-config/blob/main/my-team/skl.yaml` → host
    `github.com`, owner `ashleydavis`, repo `skl-example-config`, ref `main`, path
    `my-team/skl.yaml`. `https://github.com/ashleydavis/skl-example-config/my-team/skl.yaml`
    (no `/blob/`) → ref defaults to `HEAD`.
-2. Spec starts with `git@` — SSH. The first `:` separates `git@host` from
+2. Spec starts with `git@`: SSH. The first `:` separates `git@host` from
    `owner/repo`. A second `:` (after optional `.git`) starts the file path.
    Example: `git@github.com:ashleydavis/skl-example-config.git:my-team/skl.yaml`. No second
    colon is an error (path required).

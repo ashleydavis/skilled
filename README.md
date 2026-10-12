@@ -1,6 +1,12 @@
 # skl
 
-`skl` installs Cursor and Claude skill packages from git.
+`skl` allows users to publish and share their Claude and Cursor skills and stay up to date.
+
+- A package is a git repo with `skills/` and `commands/` directories. `skl add` clones it and links it into Cursor and Claude under a namespace you choose, for one project or for your whole machine (`-g`).
+- Each package follows `main`, or a branch you name. `skl update` brings every package up to the latest commit on its branch.
+- A team can keep its package list in one YAML file in a git repo, and everyone installs that list with `skl init --from`.
+- A package can point at a local copy you are editing (`--local`), so changes show up immediately.
+- Each project, and your machine, also gets a scratch directory for skills and commands that belong in no package.
 
 ## Install
 
@@ -74,17 +80,13 @@ Add `-g` / `--global` to `init` or `add` to work with your global config under `
 
 ### Scratch skills and commands
 
-`skl init` also creates a scratch directory for skills and commands you do not
-want in a package:
+`skl init` also creates a scratch directory for skills and commands you do not want in a package:
 
 ```sh
-mkdir -p .skilled/scratch/skills/hello
-$EDITOR .skilled/scratch/skills/hello/SKILL.md
+code .skilled/scratch/commands/hello.md
 ```
 
-That skill is `loc:hello` in Cursor and Claude with no other command; run it
-with `/loc:hello`. Commands go under `.skilled/scratch/commands/`, and
-`skl list` prints what is there.
+Once saved, that command is `loc:hello` in Cursor and Claude without running anything else; run it with `/loc:hello`. Skills go under `.skilled/scratch/skills/<name>/SKILL.md`, and `skl list` prints what is there.
 
 With `-g` the directory is `~/.skilled/scratch` and the links are global. `skl
 install` and `skl update` put back a link that was deleted. The namespace `loc`
@@ -92,22 +94,21 @@ is reserved for it.
 
 ### A branch
 
-Any listed package can be cloned from a named branch:
+A package can be cloned from a named branch:
 
 ```sh
 skl add owner/repo --ns demo --branch feature
 ```
 
-That clones `feature` and records `branch: feature` in `skl.yaml`. Switch the
-listed package to another branch with `update`:
+That clones `feature` and records `branch: feature` in `skl.yaml`. Switch a package already in `skl.yaml` to another branch with `update`:
 
 ```sh
 skl update demo --branch main
 ```
 
-### A local working tree
+### A local copy
 
-Clone the package somewhere you will edit, then point `skl` at that tree:
+Clone the package somewhere you will edit, then point `skl` at that directory:
 
 ```sh
 git clone git@github.com:ashleydavis/skl-example-skills.git ~/src/skl-example-skills
@@ -115,7 +116,7 @@ skl add ashleydavis/skl-example-skills --ns demo --local ~/src/skl-example-skill
 ```
 
 Agent links go to that path, so edits show up without `update`. The YAML `repo`
-is still the remote identity. Switch an already-listed package the same way,
+is still the remote identity. Switch a package already in `skl.yaml` the same way,
 then back to a remote branch:
 
 ```sh
@@ -136,7 +137,7 @@ skl init -g
 skl -g add ashleydavis/skl-example-skills --ns demo
 ```
 
-#### From a YAML file
+#### Bootstrap configuration from a YAML file
 
 ```sh
 skl init -g --from https://github.com/ashleydavis/skl-example-config/blob/main/my-team/skl.yaml
@@ -159,7 +160,7 @@ skl init
 skl add ashleydavis/skl-example-skills --ns demo
 ```
 
-#### From a YAML file
+#### Bootstrap configuration from a YAML file
 
 ```sh
 skl init --from https://github.com/ashleydavis/skl-example-config/blob/main/my-team/skl.yaml
@@ -173,35 +174,9 @@ skl add --from https://github.com/ashleydavis/skl-example-config/blob/main/my-te
 skl install
 ```
 
-See [How it works](docs/HOW_IT_WORKS.md) and [Command reference](docs/COMMANDS.md).
+## References
 
-## Development
-
-Build from source with Zig 0.16:
-
-```sh
-zig build
-```
-
-The release step writes `bin/<arch>/<os>/skl` (`.exe` on Windows).
-
-```sh
-zig build
-zig build test
-./scripts/smoke-tests.sh
-./scripts/smoke-tests.sh --binary
-./scripts/test-everything.sh
-```
-
-`zig build release` is required before `--binary` so the smoke suite can find
-`bin/<arch>/<os>/skl`.
-
-Smoke scenarios are independent: each one builds its own throwaway `HOME`,
-project directory, and fixture remotes. The suite runs them in four lanes that
-each take the next scenario as soon as they are free. `--jobs N` changes the
-number of lanes and `--only <pattern>` runs a single scenario:
-
-```sh
-./scripts/smoke-tests.sh --jobs 8
-./scripts/smoke-tests.sh --only 31
-```
+- [How it works](docs/HOW_IT_WORKS.md)
+- [Command reference](docs/COMMANDS.md)
+- [Development](docs/DEVELOPMENT.md)
+- [Making a release](docs/RELEASING.md)

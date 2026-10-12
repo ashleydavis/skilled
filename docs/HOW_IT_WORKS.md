@@ -2,9 +2,9 @@
 
 ## Layers
 
-1. **Store** — clones live under `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, one per repo and branch (`/` in the branch written as `+`). A row without `branch:` uses `main`. That path is on purpose: v1 does not honour `XDG_DATA_HOME`. Hostnames such as `github.com` are ordinary directory names.
-2. **YAML** — user intent (`skl.yaml` in the active scope).
-3. **Symlinks** — each package namespace under Cursor and Claude skill/command
+1. **Store:** clones live under `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, one per repo and branch (`/` in the branch written as `+`). A row without `branch:` uses `main`. That path is on purpose: v1 does not honour `XDG_DATA_HOME`. Hostnames such as `github.com` are ordinary directory names.
+2. **YAML:** user intent (`skl.yaml` in the active scope).
+3. **Symlinks:** each package namespace under Cursor and Claude skill/command
    dirs, plus the scratch directory under the reserved namespace `loc`.
 
 `skl` never writes under `~/.cursor/skills-cursor/` (Cursor-managed). If there
