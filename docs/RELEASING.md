@@ -7,7 +7,12 @@ git tag -a vX.Y.Z -m "skl vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Use the next version after the highest existing tag (`git tag --list 'v*' --sort=-v:refname | head -1`).
+Use the next version after the highest existing tag. Fetch the tags first so ones pushed from elsewhere count:
+
+```sh
+git fetch origin --tags
+git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1
+```
 
 The tag push starts the Release workflow, which builds every platform's binary, runs the smoke tests on each, and publishes the GitHub Release. Follow it on the repo's Actions page or with `gh run watch`.
 

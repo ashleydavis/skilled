@@ -88,9 +88,7 @@ code .skilled/scratch/commands/hello.md
 
 Once saved, that command is `loc:hello` in Cursor and Claude without running anything else; run it with `/loc:hello`. Skills go under `.skilled/scratch/skills/<name>/SKILL.md`, and `skl list` prints what is there.
 
-With `-g` the directory is `~/.skilled/scratch` and the links are global. `skl
-install` and `skl update` put back a link that was deleted. The namespace `loc`
-is reserved for it.
+With `-g` the directory is `~/.skilled/scratch` and the links are global. `skl install` and `skl update` put back a link that was deleted. The namespace `loc` is reserved for it.
 
 ### A branch
 
@@ -115,9 +113,7 @@ git clone git@github.com:ashleydavis/skl-example-skills.git ~/src/skl-example-sk
 skl add ashleydavis/skl-example-skills --ns demo --local ~/src/skl-example-skills
 ```
 
-Agent links go to that path, so edits show up without `update`. The YAML `repo`
-is still the remote identity. Switch a package already in `skl.yaml` the same way,
-then back to a remote branch:
+Agent links go to that path, so edits show up without `update`. The YAML `repo` is still the remote identity. Switch a package already in `skl.yaml` the same way, then back to a remote branch:
 
 ```sh
 skl update demo --local ~/src/skl-example-skills
@@ -178,5 +174,7 @@ skl install
 
 - [How it works](docs/HOW_IT_WORKS.md)
 - [Command reference](docs/COMMANDS.md)
+- [Writing a package](docs/PACKAGE_AUTHORS.md)
+- [Quick reference for AI agents](docs/AI_QUICK_REF.md)
 - [Development](docs/DEVELOPMENT.md)
 - [Making a release](docs/RELEASING.md)

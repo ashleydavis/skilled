@@ -2,42 +2,26 @@
 
 ## Layers
 
-1. **Store:** clones live under `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, one per repo and branch (`/` in the branch written as `+`). A row without `branch:` uses `main`. That path is on purpose: v1 does not honour `XDG_DATA_HOME`. Hostnames such as `github.com` are ordinary directory names.
+1. **Store:** clones live under `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, one per repo and branch (`/` in the branch written as `+`). A row without `branch:` uses `main`.
 2. **YAML:** user intent (`skl.yaml` in the active scope).
-3. **Symlinks:** each package namespace under Cursor and Claude skill/command
-   dirs, plus the scratch directory under the reserved namespace `loc`.
+3. **Symlinks:** each package namespace under Cursor and Claude skill/command dirs, plus the scratch directory under the reserved namespace `loc`.
 
-`skl` never writes under `~/.cursor/skills-cursor/` (Cursor-managed). If there
-is no `skl.yaml` in the active scope, commands other than `init` tell you to
-run `skl init`.
+If there is no `skl.yaml` in the active scope, commands other than `init` tell you to run `skl init`.
 
-Logical ids use a colon (`ns:name`). On disk the namespace is a directory
-(`ns/name`) because Windows forbids `:` in filenames.
+Logical ids use a colon (`ns:name`). On disk the namespace is a directory (`ns/name`) because Windows forbids `:` in filenames.
 
 ## Package layout
 
-- **Skills (one level):** each immediate subdirectory of `skills/` that contains
-  `SKILL.md` is a skill.
-- **Commands (recursive):** each `*.md` file under `commands/` is a command.
-  The name is the path relative to `commands/` with `.md` stripped, using `/`
-  (`commands/plan/create.md` → `plan/create`).
+- **Skills (one level):** each immediate subdirectory of `skills/` that contains `SKILL.md` is a skill.
+- **Commands (recursive):** each `*.md` file under `commands/` is a command. The name is the path relative to `commands/` with `.md` stripped, using `/` (`commands/plan/create.md` → `plan/create`).
 
-A package is valid when at least one of `skills/` or `commands/` exists as a
-directory. An empty tree is still linked. Cursor links `skills/<ns>` → package
-`skills/` and `commands/<ns>` → package `commands/`. Claude keeps
-`skills/<ns>` and `commands/<ns>`. A package with `skills/` and no `commands/`
-is Cursor `skills/<ns>` and Claude `commands/<ns>`, both pointing at the package
-`skills/` tree. The package directory is the store clone, or a `local:`
-working tree when that field is set.
+A package is valid when at least one of `skills/` or `commands/` exists as a directory. An empty tree is still linked. Cursor links `skills/<ns>` → package `skills/` and `commands/<ns>` → package `commands/`. Claude keeps `skills/<ns>` and `commands/<ns>`. A package with `skills/` and no `commands/` is Cursor `skills/<ns>` and Claude `commands/<ns>`, both pointing at the package `skills/` tree. The package directory is the store clone, or a `local:` working tree when that field is set.
 
-Description for a package is the first paragraph of `README.md` / `readme.md`.
-Description for a skill or command is YAML frontmatter `description` when it is
-a single-line scalar, otherwise the first paragraph of the body.
+Description for a package is the first paragraph of `README.md` / `readme.md`. Description for a skill or command is YAML frontmatter `description` when it is a single-line scalar, otherwise the first paragraph of the body.
 
 ## Scratch directory
 
-A place for a skill or a command you do not want in a package. It holds the
-same `skills/` and `commands/` trees a package has:
+A place for a skill or a command you do not want in a package. It holds the same `skills/` and `commands/` trees a package has:
 
 ```
 .skilled/scratch/
@@ -47,13 +31,9 @@ same `skills/` and `commands/` trees a package has:
     plan/create.md
 ```
 
-Project scope keeps it at `./.skilled/scratch`; `-g` keeps it at
-`~/.skilled/scratch`, beside the store. `XDG_CONFIG_HOME` moves the global YAML
-but not this directory.
+Project scope keeps it at `./.skilled/scratch`; `-g` keeps it at `~/.skilled/scratch`, beside the store.
 
-`skl init` creates both trees and links them. `skl install`, and `skl update`
-without `--branch` / `--local`, create and link them again, so a deleted
-directory or a deleted link comes back.
+`skl init` creates both trees and links them. `skl install`, and `skl update` without `--branch` / `--local`, create and link them again, so a deleted directory or a deleted link comes back.
 
 The four links are:
 
@@ -64,26 +44,15 @@ The four links are:
 .claude/commands/loc  → <scratch>/commands
 ```
 
-Both trees always exist, so Claude gets `skills/loc` and `commands/loc`
-directly; the skills-only remap that applies to a package does not apply here.
+Items are named by the package rules above and listed as `loc:<name>` (`loc:hello`, `loc:plan/create`).
 
-Items are named by the package rules above and listed as `loc:<name>`
-(`loc:hello`, `loc:plan/create`).
-
-`loc` is reserved. A `skl.yaml` row with `namespace: loc` is a parse error, and
-`skl add --ns loc` is refused. `skl remove loc` and `skl update loc` say `loc`
-is the scratch directory rather than reporting no package.
-
-The scratch directory is never cloned, fetched, or updated, and `skl remove`
-never deletes files in it.
+`loc` is reserved. A `skl.yaml` row with `namespace: loc` is a parse error, and `skl add --ns loc` is refused. `skl remove loc` and `skl update loc` say `loc` is the scratch directory rather than reporting no package.
 
 ## Config files
 
 **Project:** `./skl.yaml`, with links under `./.cursor` and `./.claude`.
 
-**Global:** `~/.config/skilled/skl.yaml`, or `$XDG_CONFIG_HOME/skilled/skl.yaml`
-when `XDG_CONFIG_HOME` is set. Links under `~/.cursor` and `~/.claude`. For
-namespace `ns`, each agent uses `skills/ns` and `commands/ns`.
+**Global:** `~/.config/skilled/skl.yaml`, or `$XDG_CONFIG_HOME/skilled/skl.yaml` when `XDG_CONFIG_HOME` is set. Links under `~/.cursor` and `~/.claude`. For namespace `ns`, each agent uses `skills/ns` and `commands/ns`.
 
 ```yaml
 packages:
@@ -97,29 +66,17 @@ packages:
     local: /home/me/src/skills
 ```
 
-`repo` is `owner/repo` (cloned as `git@github.com:owner/repo.git`) or a full SSH
-URL. `repo` and `namespace` are required. `branch` and `local` are optional;
-omit a field when it is unset. A row may have `branch` or `local`, not both.
+`repo` is `owner/repo` (cloned as `git@github.com:owner/repo.git`) or a full SSH URL. `repo` and `namespace` are required. `branch` and `local` are optional; omit a field when it is unset. A row may have `branch` or `local`, not both.
 
-The store path is `~/.skilled/store/<host>/<owner>/<repo>@<branch>/`, with `main` as the branch when the row has none. `local`
-does not replace that path; it is the directory agent symlinks point at.
-`skl add --local` and `skl update --local` store an absolute path (relative
-`--local` is resolved against the current working directory).
+`skl add --local` and `skl update --local` store an absolute path (relative `--local` is resolved against the current working directory).
 
 `skl install` (and `init --from` after writing YAML) uses those fields: each row is cloned with `--branch` (its `branch:`, or `main`) into its own store directory when that directory is missing, and reused when it exists. Every scope naming the same repo and branch shares that clone, and no other branch's row touches it. `skl update` fast-forwards each clone to the latest commit on its own branch. A `local:` row is not cloned; the path is scanned and linked (an error if it is missing or not a valid package).
 
-Namespaces are unique per config file, and `loc` is reserved for the scratch
-directory.
+Namespaces are unique per config file, and `loc` is reserved for the scratch directory.
 
-`skl init --from` creates `skl.yaml` from a YAML file in a git repo when the
-config is missing or still `packages: []`, then clones and links the packages
-that file lists. `skl add --from` appends that file’s packages into an existing
-`skl.yaml` and keeps entries already there; run `skl install` after `add --from`.
+`skl init --from` creates `skl.yaml` from a YAML file in a git repo when the config is missing or still `packages: []`, then clones and links the packages that file lists. `skl add --from` appends that file’s packages into an existing `skl.yaml` and keeps entries already there; run `skl install` after `add --from`.
 
-Writes to `skl.yaml` are stow-safe: if the path is a symlink to a regular file,
-`skl` opens that file and writes through it. If the path does not exist, `skl`
-creates the parent directory and the file. Anything other than a regular file
-(or a symlink to one) is an error.
+Writes to `skl.yaml` are stow-safe: if the path is a symlink to a regular file, `skl` opens that file and writes through it. If the path does not exist, `skl` creates the parent directory and the file. Anything other than a regular file (or a symlink to one) is an error.
 
 ## Git and SSH
 
@@ -128,12 +85,8 @@ Remotes are SSH:
 - `owner/repo` → `git@github.com:owner/repo.git`
 - `git@host:owner/repo.git` or `git@host:owner/repo` → used as-is
 
-Host, owner, repo, and namespace must be non-empty, not `.` or `..`, and match
-`[A-Za-z0-9._-]+` per segment (no `/`, `\`, `:`, or Windows-illegal `<>"|?*`).
-`--branch` names use the same rule per `/`-separated segment (`feature/foo`
-is allowed).
+Host, owner, repo, and namespace must be non-empty, not `.` or `..`, and match `[A-Za-z0-9._-]+` per segment (no `/`, `\`, `:`, or Windows-illegal `<>"|?*`). `--branch` names use the same rule per `/`-separated segment (`feature/foo` is allowed).
 
 ## Windows
 
-Creating agent symlinks on Windows requires Developer Mode (or an equivalent
-privilege). If symlink creation fails, `skl` prints that and exits.
+Creating agent symlinks on Windows requires Developer Mode (or an equivalent privilege). If symlink creation fails, `skl` prints that and exits.

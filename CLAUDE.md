@@ -2,6 +2,8 @@ Keep this file in sync with AGENTS.md.
 
 # Instructions for skilled (`skl`)
 
+What `skl` does, how packages are laid out, and every command, in brief: [docs/AI_QUICK_REF.md](docs/AI_QUICK_REF.md).
+
 ## Rules
 
 - **This repository must not contain company, department, team, or other sensitive details.** No real org names, hostnames, repo names, Slack channels, or internal process. Examples use generic names (`acme`, `owner/repo`). Config that belongs to a real org lives in that org’s own repos, not here.

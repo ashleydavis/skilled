@@ -60,11 +60,11 @@ zig build release
 ./scripts/smoke-tests.sh --binary
 ```
 
-Scenarios run in parallel lanes. `--jobs N` sets how many, and `--only <pattern>` runs one scenario:
+Scenarios run in parallel lanes. `--jobs N` sets how many, and `--only <pattern>` runs every scenario whose name or title contains the pattern. Use a scenario's name (`sc31`) to run just that one:
 
 ```sh
 ./scripts/smoke-tests.sh --jobs 8
-./scripts/smoke-tests.sh --only 31
+./scripts/smoke-tests.sh --only sc31
 ```
 
 ## CI
