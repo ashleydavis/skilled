@@ -6,6 +6,7 @@
 // first, so this is also the command that repairs it.
 //
 
+const std = @import("std");
 const skilled = @import("skilled");
 
 const context_mod = @import("context.zig");
@@ -15,6 +16,11 @@ const shared = @import("shared.zig");
 // The command line library this definition is written against.
 //
 const commander = skilled.commander;
+
+//
+// How a refused command says why: the failure returned in place of the exit code.
+//
+const failure = skilled.failure;
 
 //
 // The run values this command was given.
@@ -39,33 +45,44 @@ pub const Args = struct {
 //
 // Clones missing packages and links each namespace in the active config.
 //
-pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
+pub fn run(ctx: *const Context, args: Args) std.mem.Allocator.Error!failure.Result(u8) {
     const scope = try shared.scopeOf(ctx, args.global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     //
     // Before the packages, so a refused scratch link stops the run rather than leaving half the
     // namespaces linked, and so a config with no packages still gets its scratch directory.
     //
-    try shared.syncScratch(ctx, scope);
+    switch (try shared.syncScratch(ctx, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     return shared.installAll(ctx, scope, file);
 }
 
 //
 // Builds the `install` command, aliased as `i`.
 //
-pub fn buildCommand(ctx: *const Context) *Command {
-    return Command.init(ctx.allocator, "install")
+pub fn buildCommand(ctx: *const Context) std.mem.Allocator.Error!*Command {
+    const command = (try Command.init(ctx.allocator, "install"))
         .description("Clone and link every package in skl.yaml.")
-        .alias("i")
         .action(ctx, action);
+    try command.alias("i");
+    return command;
 }
 
 //
 // Unpacks Commander options and runs install.
 //
-fn action(invocation: *commander.Invocation) anyerror!void {
+fn action(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
-    invocation.exit_code = try run(ctx, .{
+    return run(ctx, .{
         .global = invocation.option("global") != null,
     });
 }

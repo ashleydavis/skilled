@@ -2,7 +2,7 @@
 // Home, config, store, scratch, and agent directories, resolved the same way on every platform.
 //
 // Nothing here touches the disk: home and XDG come from a map the caller already has, and the rest
-// is joining those strings. Tests pass a fake map and fake cwd rather than the process environment.
+// is joining those strings.
 // Cursor's managed `skills-cursor` directory is never a result of these functions.
 //
 
@@ -79,8 +79,7 @@ pub fn homeDir(env: *const std.process.Environ.Map) Error![]const u8 {
 //
 // `XDG_CONFIG_HOME` when it is set to a non-empty value, otherwise null.
 //
-// Callers pass this into `globalConfigPath` rather than reading the map again, so a test can
-// supply the override without constructing an environment.
+// Callers pass this into `globalConfigPath` rather than reading the map again.
 //
 pub fn xdgConfigHome(env: *const std.process.Environ.Map) ?[]const u8 {
     return nonEmpty(env.get("XDG_CONFIG_HOME"));

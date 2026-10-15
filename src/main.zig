@@ -70,9 +70,9 @@ const paths = skilled.paths;
 const term = skilled.term;
 
 //
-// How a refused command is described.
+// How a refused command says why: the failure `run` returns in place of an exit code.
 //
-const Failure = skilled.failure.Failure;
+const failure = skilled.failure;
 
 //
 // Values every subcommand reads, filled in from the real process here.
@@ -98,25 +98,43 @@ const HELP_EXAMPLES =
 //
 // Builds the whole command line: the program, its options, and every subcommand.
 //
-pub fn buildProgram(ctx: *const Context) *commander.Command {
-    const program = commander.program(ctx.allocator)
+pub fn buildProgram(ctx: *const Context) std.mem.Allocator.Error!*commander.Command {
+    const program = (try commander.program(ctx.allocator))
         .style(ctx.style)
         .name("skl")
         .description("Install AI agent skill packages from git.")
         .version(skilled.version.version, "-V, --version", "output the version number")
-        .option("-g, --global", "Use the global config and global agent roots.", null)
-        .option("--no-color", "Disable color and icons.", null)
-        .option("-n, --non-interactive", "Do not prompt.", null)
         .addHelpText("after", HELP_EXAMPLES);
+    try program.option("-g, --global", "Use the global config and global agent roots.", null);
+    try program.option("--no-color", "Disable color and icons.", null);
+    try program.option("-n, --non-interactive", "Do not prompt.", null);
 
-    program.addCommand(init_cmd.buildCommand(ctx));
-    program.addCommand(install_cmd.buildCommand(ctx));
-    program.addCommand(add_cmd.buildCommand(ctx));
-    program.addCommand(remove_cmd.buildCommand(ctx));
-    program.addCommand(update_cmd.buildCommand(ctx));
-    program.addCommand(list_cmd.buildCommand(ctx));
-    program.addCommand(docs_cmd.buildCommand(ctx));
+    try program.addCommand(try init_cmd.buildCommand(ctx));
+    try program.addCommand(try install_cmd.buildCommand(ctx));
+    try program.addCommand(try add_cmd.buildCommand(ctx));
+    try program.addCommand(try remove_cmd.buildCommand(ctx));
+    try program.addCommand(try update_cmd.buildCommand(ctx));
+    try program.addCommand(try list_cmd.buildCommand(ctx));
+    try program.addCommand(try docs_cmd.buildCommand(ctx));
     return program;
+}
+
+//
+// What `skl` exits with when it runs out of memory: 137, the code a shell and Kubernetes report
+// for a process the system ended for using too much memory (128 plus signal 9), so a script or a
+// CI job reads it as running out of memory.
+//
+pub const out_of_memory_exit_code: u8 = 137;
+
+//
+// The exit code for a run that failed with `err`, after its failure was reported with `reported`:
+// `out_of_memory_exit_code` when it ran out of memory, and `reported` otherwise.
+//
+pub fn exitCodeOf(err: anyerror, reported: u8) u8 {
+    if (err == error.OutOfMemory) {
+        return out_of_memory_exit_code;
+    }
+    return reported;
 }
 
 //
@@ -127,15 +145,19 @@ pub fn main(init: std.process.Init) u8 {
 
     var stdout_file = std.Io.File.stdout().writer(init.io, &.{});
     var stderr_file = std.Io.File.stderr().writer(init.io, &.{});
-    var fail = Failure.init(allocator);
 
-    const exit_code = run(init, allocator, &stdout_file.interface, &stderr_file.interface, &fail) catch |err| blk: {
-        if (err == error.OutOfMemory and fail.message == null) {
-            _ = fail.set("skl ran out of memory.", .{}) catch {};
+    const stderr_is_tty = std.Io.File.stderr().isTty(init.io) catch false;
+    const stderr_style = term.detectStyle(&.{}, init.environ_map, stderr_is_tty);
+
+    const exit_code: u8 = blk: {
+        const result = run(init, allocator, &stdout_file.interface, &stderr_file.interface) catch |err| {
+            const why = failure.because("skl ran out of memory and stopped.", .{});
+            break :blk exitCodeOf(err, reportFailure(&why, &stderr_file.interface, stderr_style));
+        };
+        switch (result) {
+            .ok => |code| break :blk code,
+            .failed => |why| break :blk reportFailure(&why, &stderr_file.interface, stderr_style),
         }
-        const stderr_is_tty = std.Io.File.stderr().isTty(init.io) catch false;
-        const style = term.detectStyle(&.{}, init.environ_map, stderr_is_tty);
-        break :blk reportFailure(&fail, &stderr_file.interface, style);
     };
 
     stdout_file.interface.flush() catch {};
@@ -148,13 +170,11 @@ pub fn main(init: std.process.Init) u8 {
 // Red when the stream takes color, so a refusal is distinguishable from ordinary output at a
 // glance; plain text when `--no-color`, `NO_COLOR`, or a redirected stream turns color off.
 //
-// Public so the tests in main.test.zig can reach it with a buffer writer.
-//
-pub fn reportFailure(fail: *Failure, writer: *std.Io.Writer, style: term.Style) u8 {
+pub fn reportFailure(why: *const failure.Failure, writer: *std.Io.Writer, style: term.Style) u8 {
     if (style.color) {
-        writer.print("\x1b[31m{s}\x1b[0m\n", .{fail.text()}) catch {};
+        writer.print("\x1b[31m{s}\x1b[0m\n", .{why.message()}) catch {};
     } else {
-        writer.print("{s}\n", .{fail.text()}) catch {};
+        writer.print("{s}\n", .{why.message()}) catch {};
     }
     return 1;
 }
@@ -167,10 +187,11 @@ fn run(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-    fail: *Failure,
-) skilled.failure.Error!u8 {
+) std.mem.Allocator.Error!failure.Result(u8) {
     const argv = init.minimal.args.toSlice(allocator) catch |err| {
-        return fail.set("Failed to read the command line: {s}.", .{@errorName(err)});
+        return .{
+            .failed = failure.because("Failed to read the command line: {s}.", .{@errorName(err)}),
+        };
     };
     const arguments = if (argv.len > 1) argv[1..] else &[_][:0]const u8{};
 
@@ -180,11 +201,15 @@ fn run(
     }
 
     const cwd = std.process.currentPathAlloc(init.io, allocator) catch |err| {
-        return fail.set("Failed to read the working directory: {s}.", .{skilled.files.describeError(err)});
+        return .{
+            .failed = failure.because("Failed to read the working directory: {s}.", .{skilled.files.describeError(err)}),
+        };
     };
 
     const home = paths.homeDir(init.environ_map) catch {
-        return fail.set("HOME is not set.", .{});
+        return .{
+            .failed = failure.because("HOME is not set.", .{}),
+        };
     };
 
     const stdout_is_tty = std.Io.File.stdout().isTty(init.io) catch false;
@@ -195,38 +220,24 @@ fn run(
     var stdin_file = std.Io.File.stdin().reader(init.io, &stdin_buf);
 
     const ctx = try allocator.create(Context);
-    ctx.* = .{
-        .allocator = allocator,
-        .io = init.io,
-        .environ = init.environ_map,
-        .cwd = cwd,
-        .home = home,
-        .style = term.detectStyle(widened.items, init.environ_map, stdout_is_tty),
-        .non_interactive = term.nonInteractive(widened.items, init.environ_map, stdin_is_tty),
-        .stderr_is_tty = stderr_is_tty,
-        .git = git.processRunner(),
-        .browser = .process,
-        .stdin = &stdin_file.interface,
-        .stdout = stdout,
-        .stderr = stderr,
-        .fail = fail,
-    };
+    ctx.* = .init(allocator, init.io, init.environ_map, cwd, home, &stdin_file.interface, stdout, stderr);
+    ctx.style = term.detectStyle(widened.items, init.environ_map, stdout_is_tty);
+    ctx.non_interactive = term.nonInteractive(widened.items, init.environ_map, stdin_is_tty);
+    ctx.stderr_is_tty = stderr_is_tty;
 
-    const program = buildProgram(ctx);
+    const program = try buildProgram(ctx);
 
-    var runner = commander.Program{ .out = stdout };
-    commander.parse(&runner, program, widened.items) catch |err| switch (err) {
-        error.Displayed => return 0,
-        error.Refused => {
-            if (runner.message) |message| {
-                _ = fail.set("{s}", .{message}) catch {};
-            }
-            return error.Failed;
+    return switch (try commander.parse(stdout, program, widened.items)) {
+        .displayed => .{
+            .ok = 0,
         },
-        error.OutOfMemory => return error.OutOfMemory,
+        .ran => |code| .{
+            .ok = code,
+        },
+        .refused => |why| .{
+            .failed = why,
+        },
     };
-
-    return runner.exit_code;
 }
 
 test {

@@ -20,7 +20,7 @@ const yaml = @import("yaml.zig");
 // string, otherwise the first paragraph of the body.
 //
 // Vendored yaml.zig does not parse markdown, so the fence is stripped here before the inner
-// mapping is handed to it. Allocations come from the caller (an arena in the CLI and in tests).
+// mapping is handed to it. Allocations come from the caller.
 //
 pub fn extract(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error![]const u8 {
     const parts = split(text);
@@ -64,15 +64,31 @@ fn split(text: []const u8) Parts {
         if (std.mem.startsWith(u8, text, "---\r\n")) {
             break :blk text[5..];
         }
-        return .{ .yaml = null, .body = text };
+        return .{
+            .yaml = null,
+            .body = text,
+        };
     };
 
     const closing_at = findClosingFence(after_open) orelse {
-        return .{ .yaml = null, .body = text };
+        return .{
+            .yaml = null,
+            .body = text,
+        };
     };
+    //
+    // How many bytes the closing `---` line occupies with its line ending: none at the end of the
+    // file, `\n`, or `\r\n`, which are the only endings findClosingFence accepts.
+    //
+    const fence_len: usize = if (closing_at + 3 == after_open.len)
+        3
+    else if (after_open[closing_at + 3] == '\n')
+        4
+    else
+        5;
     return .{
         .yaml = after_open[0..closing_at],
-        .body = after_open[closing_at + fenceLineLen(after_open, closing_at) ..],
+        .body = after_open[closing_at + fence_len ..],
     };
 }
 
@@ -96,8 +112,8 @@ fn findClosingFence(after_open: []const u8) ?usize {
 //
 // True when text[i..] is a line whose only content is `---`.
 //
-fn isFenceLineAt(text: []const u8, i: usize) bool {
-    if (i + 3 > text.len) {
+pub fn isFenceLineAt(text: []const u8, i: usize) bool {
+    if (i > text.len or text.len - i < 3) {
         return false;
     }
     if (!std.mem.eql(u8, text[i .. i + 3], "---")) {
@@ -116,29 +132,15 @@ fn isFenceLineAt(text: []const u8, i: usize) bool {
 }
 
 //
-// How many bytes the `---` line at i occupies, including its trailing newline when present.
-//
-fn fenceLineLen(text: []const u8, i: usize) usize {
-    if (i + 3 == text.len) {
-        return 3;
-    }
-    if (text[i + 3] == '\n') {
-        return 4;
-    }
-    return 5;
-}
-
-//
 // The frontmatter `description` when it is a non-empty plain or quoted string; otherwise null.
 //
 // YAML that fails to parse, a non-object document, a missing key, a multi-line scalar, or a
 // non-string value all return null so the caller can use the body instead.
 //
 fn descriptionFromYaml(allocator: std.mem.Allocator, inner: []const u8) std.mem.Allocator.Error!?[]const u8 {
-    var err: ?yaml.SyntaxError = null;
-    const parsed = yaml.parse(allocator, inner, &err) catch |caught| switch (caught) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.Syntax => return null,
+    const parsed = switch (try yaml.parse(allocator, inner)) {
+        .ok => |read| read,
+        .invalid => return null,
     };
     if (!value.isPlainObject(parsed)) {
         return null;

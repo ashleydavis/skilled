@@ -6,9 +6,12 @@ const std = @import("std");
 const config = @import("config.zig");
 const failure = @import("failure.zig");
 const files = @import("files.zig");
+const TemporaryDir = @import("test_disk").TemporaryDir;
+const TestIo = @import("test_disk").TestIo;
 const from = @import("from.zig");
 const git = @import("git.zig");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 //
 // YAML the fake `git show` returns unless a test overrides it.
@@ -87,7 +90,12 @@ const Scripted = struct {
     // The GitRunner fetchConfig takes.
     //
     fn runner(self: *Scripted) git.GitRunner {
-        return git.customRunner(@ptrCast(self), run);
+        return .{
+            .function = .{
+                .ctx = @ptrCast(self),
+                .runFn = run,
+            },
+        };
     }
 };
 
@@ -95,9 +103,8 @@ test "parse shorthand owner/repo:path defaults ref to HEAD" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try from.parse(allocator, "acme/skl-config:teams/platform.yaml", &fail);
+    const got = try expect_result.ok(try from.parse(allocator, "acme/skl-config:teams/platform.yaml"));
     try testing.expectEqualStrings("git@github.com:acme/skl-config.git", got.remote.clone_url);
     try testing.expectEqualStrings("github.com", got.remote.host);
     try testing.expectEqualStrings("acme", got.remote.owner);
@@ -110,13 +117,11 @@ test "parse SSH with two colons keeps the SSH clone URL and strips .git from the
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try from.parse(
+    const got = try expect_result.ok(try from.parse(
         allocator,
         "git@github.com:acme/skl-config.git:teams/platform.yaml",
-        &fail,
-    );
+    ));
     try testing.expectEqualStrings("git@github.com:acme/skl-config.git", got.remote.clone_url);
     try testing.expectEqualStrings("github.com", got.remote.host);
     try testing.expectEqualStrings("skl-config", got.remote.repo);
@@ -128,13 +133,11 @@ test "parse blob URL with ref still clones over SSH" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try from.parse(
+    const got = try expect_result.ok(try from.parse(
         allocator,
         "https://github.com/acme/skl-config/blob/main/teams/platform.yaml",
-        &fail,
-    );
+    ));
     try testing.expectEqualStrings("git@github.com:acme/skl-config.git", got.remote.clone_url);
     try testing.expectEqualStrings("github.com", got.remote.host);
     try testing.expectEqualStrings("acme", got.remote.owner);
@@ -147,13 +150,11 @@ test "parse HTTPS without blob defaults ref to HEAD" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try from.parse(
+    const got = try expect_result.ok(try from.parse(
         allocator,
         "https://github.com/acme/skl-config/teams/platform.yaml",
-        &fail,
-    );
+    ));
     try testing.expectEqualStrings("HEAD", got.ref);
     try testing.expectEqualStrings("teams/platform.yaml", got.path);
     try testing.expectEqualStrings("git@github.com:acme/skl-config.git", got.remote.clone_url);
@@ -163,56 +164,48 @@ test "parse rejects a spec with no colon" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, from.parse(allocator, "acme/skl-config", &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "owner/repo:path") != null);
+    const why = try expect_result.failed(try from.parse(allocator, "acme/skl-config"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "owner/repo:path") != null);
 }
 
 test "parse rejects SSH with no file path" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, from.parse(allocator, "git@github.com:acme/skl-config.git", &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "path") != null);
+    const why = try expect_result.failed(try from.parse(allocator, "git@github.com:acme/skl-config.git"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "path") != null);
 }
 
 test "parse rejects a non-github.com HTTPS host" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(
-        error.Failed,
-        from.parse(allocator, "https://github.example.com/acme/skl-config/blob/main/teams/platform.yaml", &fail),
-    );
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "github.com") != null);
+    const why = try expect_result.failed(try from.parse(allocator, "https://github.example.com/acme/skl-config/blob/main/teams/platform.yaml"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "github.com") != null);
 }
 
 test "parse rejects an empty spec" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, from.parse(allocator, "", &fail));
+    _ = try expect_result.failed(try from.parse(allocator, ""));
 }
 
 test "parse rejects .. in a path segment" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, from.parse(allocator, "acme/skl-config:../skl.yaml", &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "path") != null);
+    const why = try expect_result.failed(try from.parse(allocator, "acme/skl-config:../skl.yaml"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "path") != null);
 }
 
 test "fetchConfig clones over SSH, shows ref:path, and deletes the temp clone" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -220,7 +213,7 @@ test "fetchConfig clones over SSH, shows ref:path, and deletes the temp clone" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
     const tmp = try temporary.join(allocator, "tmp");
     try files.makeDirPath(io, tmp);
@@ -228,19 +221,21 @@ test "fetchConfig clones over SSH, shows ref:path, and deletes the temp clone" {
     var environ = std.process.Environ.Map.init(allocator);
     try environ.put("TMPDIR", tmp);
 
-    var scripted = Scripted{ .allocator = allocator };
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
     try scripted.enqueue(.{});
-    try scripted.enqueue(.{ .stdout = platform_yaml });
+    try scripted.enqueue(.{
+        .stdout = platform_yaml,
+    });
 
-    var fail = failure.Failure.init(allocator);
-    const file = try from.fetchConfig(
+    const file = try expect_result.ok(try from.fetchConfig(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "https://github.com/acme/skl-config/blob/main/teams/platform.yaml",
-        &fail,
-    );
+    ));
 
     try testing.expectEqual(@as(usize, 2), file.packages.len);
     try testing.expectEqualStrings("acme/skills", file.packages[0].repo);
@@ -259,7 +254,7 @@ test "fetchConfig clones over SSH, shows ref:path, and deletes the temp clone" {
 }
 
 test "fetchConfig maps a missing file at ref:path to a failure and still deletes the temp clone" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -267,7 +262,7 @@ test "fetchConfig maps a missing file at ref:path to a failure and still deletes
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
     const tmp = try temporary.join(allocator, "tmp");
     try files.makeDirPath(io, tmp);
@@ -275,23 +270,23 @@ test "fetchConfig maps a missing file at ref:path to a failure and still deletes
     var environ = std.process.Environ.Map.init(allocator);
     try environ.put("TMPDIR", tmp);
 
-    var scripted = Scripted{ .allocator = allocator };
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
     try scripted.enqueue(.{});
     try scripted.enqueue(.{
         .exit_code = 128,
         .stderr = "fatal: path 'teams/missing.yaml' does not exist in 'HEAD'\n",
     });
 
-    var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, from.fetchConfig(
+    const why = try expect_result.failed(try from.fetchConfig(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "acme/skl-config:teams/missing.yaml",
-        &fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "git show") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "git show") != null);
     try testing.expectEqual(@as(usize, 2), scripted.calls.items.len);
     try expectArgv(scripted.calls.items[1], &.{ "git", "show", "HEAD:teams/missing.yaml" });
     const dest = scripted.calls.items[0].argv[scripted.calls.items[0].argv.len - 1];
@@ -303,14 +298,22 @@ test "mergePackages keeps existing extras and appends new namespaces" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const existing = [_]config.Package{.{ .repo = "acme/both", .namespace = "keep" }};
+    const existing = [_]config.Package{.{
+        .repo = "acme/both",
+        .namespace = "keep",
+    }};
     const incoming = [_]config.Package{
-        .{ .repo = "acme/skills", .namespace = "demo" },
-        .{ .repo = "acme/cmds", .namespace = "cmd" },
+        .{
+            .repo = "acme/skills",
+            .namespace = "demo",
+        },
+        .{
+            .repo = "acme/cmds",
+            .namespace = "cmd",
+        },
     };
-    const merged = try from.mergePackages(allocator, &existing, &incoming, &fail);
+    const merged = try expect_result.ok(try from.mergePackages(allocator, &existing, &incoming));
     try testing.expectEqual(@as(usize, 3), merged.len);
     try testing.expectEqualStrings("keep", merged[0].namespace);
     try testing.expectEqualStrings("demo", merged[1].namespace);
@@ -321,14 +324,16 @@ test "mergePackages skips the same namespace and same package including SSH vs s
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
     const existing = [_]config.Package{.{
         .repo = "git@github.com:acme/skills.git",
         .namespace = "demo",
     }};
-    const incoming = [_]config.Package{.{ .repo = "acme/skills", .namespace = "demo" }};
-    const merged = try from.mergePackages(allocator, &existing, &incoming, &fail);
+    const incoming = [_]config.Package{.{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    }};
+    const merged = try expect_result.ok(try from.mergePackages(allocator, &existing, &incoming));
     try testing.expectEqual(@as(usize, 1), merged.len);
     try testing.expectEqualStrings("git@github.com:acme/skills.git", merged[0].repo);
 }
@@ -337,12 +342,17 @@ test "mergePackages errors when a namespace is taken by a different repo" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const existing = [_]config.Package{.{ .repo = "acme/skills", .namespace = "demo" }};
-    const incoming = [_]config.Package{.{ .repo = "acme/both", .namespace = "demo" }};
-    try testing.expectError(error.Failed, from.mergePackages(allocator, &existing, &incoming, &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "already used") != null);
+    const existing = [_]config.Package{.{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    }};
+    const incoming = [_]config.Package{.{
+        .repo = "acme/both",
+        .namespace = "demo",
+    }};
+    const why = try expect_result.failed(try from.mergePackages(allocator, &existing, &incoming));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "already used") != null);
 }
 
 //
@@ -355,8 +365,7 @@ fn run(
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
     cwd: ?[]const u8,
-    fail: *failure.Failure,
-) git.RunError!git.Result {
+) git.RunError!failure.Result(git.Result) {
     _ = io;
     _ = environ;
     const self: *Scripted = @ptrCast(@alignCast(ctx));
@@ -365,13 +374,17 @@ fn run(
         .cwd = if (cwd) |path| try self.allocator.dupe(u8, path) else null,
     });
     if (self.calls.items.len > self.replies.items.len) {
-        return fail.set("scripted git has no reply left for {s}", .{argv[1]});
+        return .{
+            .failed = failure.because("scripted git has no reply left for {s}", .{argv[1]}),
+        };
     }
     const reply = self.replies.items[self.calls.items.len - 1];
     return .{
-        .stdout = try allocator.dupe(u8, reply.stdout),
-        .stderr = try allocator.dupe(u8, reply.stderr),
-        .exit_code = reply.exit_code,
+        .ok = .{
+            .stdout = try allocator.dupe(u8, reply.stdout),
+            .stderr = try allocator.dupe(u8, reply.stderr),
+            .exit_code = reply.exit_code,
+        },
     };
 }
 
@@ -412,4 +425,26 @@ fn expectArgvPrefix(call: Call, expected: []const []const u8) !void {
 fn pathExists(io: std.Io, path: []const u8) bool {
     _ = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
     return true;
+}
+
+test "parseHttps refuses a spec that does not start with https://, a shorter one included" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    for ([_][]const u8{ "", "h", "https:/", "acme/skl-config:teams/platform.yaml" }) |spec| {
+        const why = try expect_result.failed(try from.parseHttps(allocator, spec));
+        try testing.expect(std.mem.indexOf(u8, why.message(), "invalid --from URL") != null);
+    }
+}
+
+test "parseSsh refuses a spec that does not start with git@, a shorter one included" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    for ([_][]const u8{ "", "g", "git", "acme/skl-config:teams/platform.yaml" }) |spec| {
+        const why = try expect_result.failed(try from.parseSsh(allocator, spec));
+        try testing.expect(std.mem.indexOf(u8, why.message(), "Invalid --from spec") != null);
+    }
 }

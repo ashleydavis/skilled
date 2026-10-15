@@ -1,70 +1,80 @@
 //
-// How the message that goes with a failure is carried.
+// How a failure and the message that goes with it are returned.
 //
-// Zig errors are bare enum values and cannot carry a string, so the string travels beside the error
-// instead: every function that can fail takes a `*Failure`, fills in its message, and returns
-// `error.Failed`. The top of the CLI prints whatever is in there.
+// Zig errors are bare enum values and cannot carry a string, so a function that can refuse returns
+// a `Result`: either its value or a `Failure` holding the message. The message travels back with
+// the failure, through every caller, to the top of the CLI, which prints it. Nothing is written
+// anywhere on the way.
 //
-// This is deliberately not one error value per failure mode. Nothing in this tool branches on which
-// failure happened: every one of them ends the same way, printed to stderr with exit code 1. What
-// matters is that the wording reaches the user, so that is the part that is modelled.
+// Running out of memory is not a refusal: it stays the Zig error `error.OutOfMemory`, so a function
+// that allocates returns `std.mem.Allocator.Error!Result(T)`.
 //
 
 const std = @import("std");
 
 //
-// The error every fallible function in this project returns.
+// How many bytes a message can hold. Far more than any message here, which is a sentence naming a
+// path or a package. A longer one is cut short and ends in `...`.
 //
-// `Failed` means "a message has been left in the Failure". `OutOfMemory` is unavoidable in Zig and
-// is handled at the top of the CLI like any other failure, so callers never have to think about it.
-//
-pub const Error = error{Failed} || std.mem.Allocator.Error;
+pub const message_capacity = 1024;
 
 //
-// Carries the message describing why something failed, back to whoever is going to print it.
+// Why something was refused, as the sentence a person reads. Held inside the value, so making one
+// allocates nothing and cannot fail.
 //
 pub const Failure = struct {
     //
-    // Where the message is allocated. An arena in the real CLI, so nothing has to be freed on the
-    // way out of a failing run.
+    // The message's bytes, of which the first `len` are written.
     //
-    allocator: std.mem.Allocator,
+    buffer: [message_capacity]u8 = undefined,
 
     //
-    // The message, or null when nothing has failed yet.
+    // How many bytes of `buffer` the message is.
     //
-    message: ?[]const u8 = null,
+    len: usize = 0,
 
     //
-    // Makes a Failure that allocates its messages from the given allocator.
+    // The message.
     //
-    pub fn init(allocator: std.mem.Allocator) Failure {
-        return .{ .allocator = allocator };
-    }
-
-    //
-    // Records a message and returns the error to return, so a caller can write the whole thing as
-    // one statement: `return fail.set("...", .{});`
-    //
-    // The first message wins. A failure deep in the call stack is the one that says what actually
-    // went wrong; anything added on the way out would only describe the unwinding.
-    //
-    pub fn set(self: *Failure, comptime fmt: []const u8, args: anytype) Error {
-        if (self.message == null) {
-            self.message = std.fmt.allocPrint(self.allocator, fmt, args) catch return error.OutOfMemory;
-        }
-        return error.Failed;
-    }
-
-    //
-    // The recorded message, or a stand-in when something returned `error.Failed` without leaving
-    // one. That stand-in should never be seen; it is here so a bug in this tool prints something a
-    // person can act on rather than nothing at all.
-    //
-    pub fn text(self: *const Failure) []const u8 {
-        return self.message orelse "skl failed without saying why.";
+    pub fn message(self: *const Failure) []const u8 {
+        return self.buffer[0..self.len];
     }
 };
+
+//
+// A Failure whose message is `fmt` formatted with `args`.
+//
+pub fn because(comptime fmt: []const u8, args: anytype) Failure {
+    var made: Failure = .{};
+    var writer = std.Io.Writer.fixed(&made.buffer);
+    writer.print(fmt, args) catch {
+        //
+        // The message did not fit: what did fit is kept and ends in `...`, so a reader can tell
+        // it was cut.
+        //
+        writer.end = made.buffer.len - "...".len;
+        writer.writeAll("...") catch unreachable;
+    };
+    made.len = writer.end;
+    return made;
+}
+
+//
+// What a function that can refuse returns: its value, or the failure that says why not.
+//
+pub fn Result(comptime T: type) type {
+    return union(enum) {
+        //
+        // The value, when nothing was refused.
+        //
+        ok: T,
+
+        //
+        // Why it was refused.
+        //
+        failed: Failure,
+    };
+}
 
 test {
     //

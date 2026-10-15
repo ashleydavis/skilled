@@ -17,6 +17,11 @@ const shared = @import("shared.zig");
 const commander = skilled.commander;
 
 //
+// How a refused command says why: the failure returned in place of the exit code.
+//
+const failure = skilled.failure;
+
+//
 // Package description and skill/command items, when the clone exists.
 //
 const package = skilled.package;
@@ -49,33 +54,59 @@ pub const Args = struct {
 //
 // Prints one package (chosen by name, menu, or the only entry) and opens Pages when interactive.
 //
-pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
+pub fn run(ctx: *const Context, args: Args) std.mem.Allocator.Error!failure.Result(u8) {
     const scope = try shared.scopeOf(ctx, args.global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     if (file.packages.len == 0) {
-        return ctx.fail.set("There are no packages in skl.yaml.", .{});
+        return .{
+            .failed = failure.because("There are no packages in skl.yaml.", .{}),
+        };
     }
 
-    const pkg = try selectPackage(ctx, file.packages, args.query);
-    var parse_fail = skilled.failure.Failure.init(ctx.allocator);
-    const parsed = skilled.remote.parse(ctx.allocator, pkg.repo, &parse_fail) catch {
-        return ctx.fail.set("{s}", .{parse_fail.text()});
+    const pkg = switch (try selectPackage(ctx, file.packages, args.query)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const parsed = switch (try skilled.remote.parse(ctx.allocator, pkg.repo)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
     };
     const pages = try shared.pagesGuessUrl(ctx.allocator, parsed);
 
-    try printDetails(ctx, pkg, parsed, pages);
+    switch (try printDetails(ctx, pkg, parsed, pages)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
 
     if (!ctx.non_interactive) {
-        try shared.openUrl(ctx, pages);
+        switch (try shared.openUrl(ctx, pages)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
-    return 0;
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds the `docs` command.
 //
-pub fn buildCommand(ctx: *const Context) *Command {
-    return Command.init(ctx.allocator, "docs")
+pub fn buildCommand(ctx: *const Context) std.mem.Allocator.Error!*Command {
+    return (try Command.init(ctx.allocator, "docs"))
         .description("Print package details and open GitHub Pages.")
         .argument("[package]", "The package to show.")
         .action(ctx, action);
@@ -88,26 +119,51 @@ fn selectPackage(
     ctx: *const Context,
     packages: []const skilled.config.Package,
     query: ?[]const u8,
-) skilled.failure.Error!skilled.config.Package {
+) std.mem.Allocator.Error!failure.Result(skilled.config.Package) {
     if (query) |q| {
-        const matched = try shared.requireOneMatch(ctx.allocator, packages, q, ctx.fail);
-        return matched.pkg;
+        const matched = switch (try shared.requireOneMatch(ctx.allocator, packages, q)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
+        return .{
+            .ok = matched.pkg,
+        };
     }
     if (ctx.non_interactive) {
-        return ctx.fail.set("The docs command requires a package name when non-interactive.", .{});
+        return .{
+            .failed = failure.because("The docs command requires a package name when non-interactive.", .{}),
+        };
     }
     for (packages, 0..) |pkg, i| {
-        try shared.line(ctx, "{d}. {s}  {s}", .{ i + 1, pkg.namespace, pkg.repo });
+        switch (shared.line(ctx, "{d}. {s}  {s}", .{ i + 1, pkg.namespace, pkg.repo })) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
     shared.promptWrite(ctx, "Select a package: ", .{});
-    const answer = try shared.promptLine(ctx);
+    const answer = switch (try shared.promptLine(ctx)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     const n = std.fmt.parseInt(usize, answer, 10) catch {
-        return ctx.fail.set("Expected a package number.", .{});
+        return .{
+            .failed = failure.because("Expected a package number.", .{}),
+        };
     };
     if (n == 0 or n > packages.len) {
-        return ctx.fail.set("Expected a package number.", .{});
+        return .{
+            .failed = failure.because("Expected a package number.", .{}),
+        };
     }
-    return packages[n - 1];
+    return .{
+        .ok = packages[n - 1],
+    };
 }
 
 //
@@ -118,44 +174,91 @@ fn printDetails(
     pkg: skilled.config.Package,
     parsed: skilled.remote.Remote,
     pages: []const u8,
-) skilled.failure.Error!void {
-    try shared.line(ctx, "{s} {s}", .{ ctx.style.package(), parsed.repo });
-    try shared.line(ctx, "Namespace: {s}", .{try shared.namespaceText(ctx, pkg.namespace)});
-    try shared.line(ctx, "Repo: {s}", .{try shared.identifier(ctx, pkg.repo)});
+) std.mem.Allocator.Error!failure.Result(void) {
+    switch (shared.line(ctx, "{s} {s}", .{ ctx.style.package(), parsed.repo })) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (shared.line(ctx, "Namespace: {s}", .{try shared.namespaceText(ctx, pkg.namespace)})) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (shared.line(ctx, "Repo: {s}", .{try shared.identifier(ctx, pkg.repo)})) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     if (pkg.branch) |branch| {
-        try shared.line(ctx, "Branch: {s}", .{try shared.identifier(ctx, branch)});
+        switch (shared.line(ctx, "Branch: {s}", .{try shared.identifier(ctx, branch)})) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
     if (pkg.local) |local_path| {
-        try shared.line(ctx, "Local: {s}", .{try shared.muted(ctx, local_path)});
-    }
-
-    const dest = shared.contentDir(ctx, pkg) catch |err| switch (err) {
-        error.Failed => null,
-        error.OutOfMemory => return error.OutOfMemory,
-    };
-    if (dest) |path| {
-        if (shared.dirExists(ctx.io, path)) {
-            if (try package.readmeDescription(ctx.io, ctx.allocator, path, ctx.fail)) |description| {
-                try shared.line(ctx, "{s}", .{try shared.muted(ctx, description)});
-            }
-            var scan_fail = skilled.failure.Failure.init(ctx.allocator);
-            if (package.scan(ctx.io, ctx.allocator, path, &scan_fail)) |items| {
-                for (items) |item| {
-                    try shared.line(ctx, "  {s}:{s}  {s}", .{ pkg.namespace, item.name, item.description });
-                }
-            } else |_| {}
+        switch (shared.line(ctx, "Local: {s}", .{try shared.muted(ctx, local_path)})) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
         }
     }
 
-    try shared.line(ctx, "GitHub Pages: {s}", .{try shared.identifier(ctx, pages)});
+    //
+    // A package whose directory cannot be worked out, or whose tree cannot be scanned, still gets
+    // its YAML fields and the Pages guess printed, so those failures are not returned.
+    //
+    const dest: ?[]const u8 = switch (try shared.contentDir(ctx, pkg)) {
+        .ok => |path| path,
+        .failed => null,
+    };
+    if (dest) |path| {
+        if (shared.dirExists(ctx.io, path)) {
+            const readme = switch (try package.readmeDescription(ctx.io, ctx.allocator, path)) {
+                .ok => |got| got,
+                .failed => |why| return .{
+                    .failed = why,
+                },
+            };
+            if (readme) |description| {
+                switch (shared.line(ctx, "{s}", .{try shared.muted(ctx, description)})) {
+                    .ok => {},
+                    .failed => |why| return .{
+                        .failed = why,
+                    },
+                }
+            }
+            switch (try package.scan(ctx.io, ctx.allocator, path)) {
+                .ok => |items| {
+                    for (items) |item| {
+                        switch (shared.line(ctx, "  {s}:{s}  {s}", .{ pkg.namespace, item.name, item.description })) {
+                            .ok => {},
+                            .failed => |why| return .{
+                                .failed = why,
+                            },
+                        }
+                    }
+                },
+                .failed => {},
+            }
+        }
+    }
+
+    return shared.line(ctx, "GitHub Pages: {s}", .{try shared.identifier(ctx, pages)});
 }
 
 //
 // Unpacks Commander options and runs docs.
 //
-fn action(invocation: *commander.Invocation) anyerror!void {
+fn action(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
-    invocation.exit_code = try run(ctx, .{
+    return run(ctx, .{
         .global = invocation.option("global") != null,
         .query = if (invocation.args.len > 0) invocation.args[0] else null,
     });

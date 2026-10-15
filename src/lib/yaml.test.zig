@@ -5,19 +5,30 @@
 const std = @import("std");
 const value = @import("value.zig");
 const yaml = @import("yaml.zig");
-const failure = @import("failure.zig");
+const expect_result = @import("expect_result");
 const Value = value.Value;
-const Failure = failure.Failure;
 const testing = std.testing;
 
 //
 // Parses text in a test, failing the test with the syntax error's own words if it will not parse.
 //
 fn parseForTest(allocator: std.mem.Allocator, text: []const u8) !Value {
-    var err: ?yaml.SyntaxError = null;
-    return yaml.parse(allocator, text, &err) catch |caught| {
-        if (err) |detail| std.debug.print("YAML error: {s} at line {d}\n", .{ detail.message, detail.line });
-        return caught;
+    return switch (try yaml.parse(allocator, text)) {
+        .ok => |parsed| parsed,
+        .invalid => |detail| {
+            std.debug.print("YAML error: {s} at line {d}\n", .{ detail.message, detail.line });
+            return error.Syntax;
+        },
+    };
+}
+
+//
+// The syntax error a parse returned. A parse that succeeded fails the test.
+//
+fn invalidOf(parsed: yaml.Parsed) !yaml.SyntaxError {
+    return switch (parsed) {
+        .ok => error.TestUnexpectedResult,
+        .invalid => |detail| detail,
     };
 }
 
@@ -228,56 +239,50 @@ test "parse refuses a misaligned key under a sequence item" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expectError(error.Syntax, yaml.parse(arena.allocator(),
+    const err = try invalidOf(try yaml.parse(arena.allocator(),
         \\targets:
         \\  - name: alpha
         \\   paths: [bad indent]
-    , &err));
-    try testing.expectEqual(@as(usize, 3), err.?.line);
+    ));
+    try testing.expectEqual(@as(usize, 3), err.line);
 }
 
 test "parse refuses a tab used for indentation" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expectError(error.Syntax, yaml.parse(arena.allocator(), "targets:\n\t- name: alpha", &err));
-    try testing.expectEqual(@as(usize, 2), err.?.line);
+    const err = try invalidOf(try yaml.parse(arena.allocator(), "targets:\n\t- name: alpha"));
+    try testing.expectEqual(@as(usize, 2), err.line);
 }
 
 test "parse refuses an unterminated flow sequence" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expectError(error.Syntax, yaml.parse(arena.allocator(), "ignore: [.md, .txt", &err));
-    try testing.expect(err != null);
+    const err = try invalidOf(try yaml.parse(arena.allocator(), "ignore: [.md, .txt"));
+    try testing.expect(err.message.len > 0);
 }
 
 test "parse refuses a second document" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expectError(error.Syntax, yaml.parse(arena.allocator(), "name: a\n---\nname: b", &err));
+    _ = try invalidOf(try yaml.parse(arena.allocator(), "name: a\n---\nname: b"));
 }
 
 test "parse refuses an unsupported YAML feature rather than guessing" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expectError(error.Syntax, yaml.parse(arena.allocator(), "base: &anchor\n  name: alpha", &err));
+    _ = try invalidOf(try yaml.parse(arena.allocator(), "base: &anchor\n  name: alpha"));
 }
 
 test "parse of an empty document is null" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var err: ?yaml.SyntaxError = null;
-    try testing.expect(try yaml.parse(arena.allocator(), "", &err) == .null);
-    try testing.expect(try yaml.parse(arena.allocator(), "\n\n# only a comment\n", &err) == .null);
+    try testing.expect(try parseForTest(arena.allocator(), "") == .null);
+    try testing.expect(try parseForTest(arena.allocator(), "\n\n# only a comment\n") == .null);
 }
 
 test "parse reads a top-level sequence" {
@@ -310,10 +315,9 @@ test "parseOrFail names the format and the line" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var fail = Failure.init(allocator);
-    try testing.expectError(error.Failed, yaml.parseOrFail(allocator, "targets:\n  - name: alpha\n   paths: [x]\n", "skl.yaml", &fail));
-    try testing.expect(std.mem.startsWith(u8, fail.text(), "skl.yaml is not valid YAML: "));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "line 3") != null);
+    const why = try expect_result.failed(try yaml.parseOrFail(allocator, "targets:\n  - name: alpha\n   paths: [x]\n", "skl.yaml"));
+    try testing.expect(std.mem.startsWith(u8, why.message(), "skl.yaml is not valid YAML: "));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "line 3") != null);
 }
 
 test "needsQuoting quotes only what would read back as something else" {
@@ -347,12 +351,16 @@ test "stringify renders a report the way the yaml package does" {
     try change.put(allocator, "previousHash", value.str(""));
 
     var changed = value.newArray(allocator);
-    try changed.append(.{ .object = change });
+    try changed.append(.{
+        .object = change,
+    });
 
     var root: value.Object = .empty;
     try root.put(allocator, "hasBaseline", value.boolean(false));
     try root.put(allocator, "fileCount", value.int(4));
-    try root.put(allocator, "changed", .{ .array = changed });
+    try root.put(allocator, "changed", .{
+        .array = changed,
+    });
 
     try testing.expectEqualStrings(
         \\hasBaseline: false
@@ -361,7 +369,9 @@ test "stringify renders a report the way the yaml package does" {
         \\  - path: src/a.ts
         \\    kind: added
         \\    previousHash: ""
-    , try yaml.stringify(allocator, .{ .object = root }));
+    , try yaml.stringify(allocator, .{
+        .object = root,
+    }));
 }
 
 test "stringify renders a nested sequence inside a sequence item" {
@@ -375,14 +385,22 @@ test "stringify renders a nested sequence inside a sequence item" {
 
     var target: value.Object = .empty;
     try target.put(allocator, "name", value.str("unit"));
-    try target.put(allocator, "watchedPaths", .{ .array = watched });
-    try target.put(allocator, "changed", .{ .array = value.newArray(allocator) });
+    try target.put(allocator, "watchedPaths", .{
+        .array = watched,
+    });
+    try target.put(allocator, "changed", .{
+        .array = value.newArray(allocator),
+    });
 
     var targets = value.newArray(allocator);
-    try targets.append(.{ .object = target });
+    try targets.append(.{
+        .object = target,
+    });
 
     var root: value.Object = .empty;
-    try root.put(allocator, "targets", .{ .array = targets });
+    try root.put(allocator, "targets", .{
+        .array = targets,
+    });
 
     try testing.expectEqualStrings(
         \\targets:
@@ -391,7 +409,9 @@ test "stringify renders a nested sequence inside a sequence item" {
         \\      - src
         \\      - scripts
         \\    changed: []
-    , try yaml.stringify(allocator, .{ .object = root }));
+    , try yaml.stringify(allocator, .{
+        .object = root,
+    }));
 }
 
 test "stringify renders empty collections on one line" {
@@ -400,10 +420,16 @@ test "stringify renders empty collections on one line" {
     const allocator = arena.allocator();
 
     var root: value.Object = .empty;
-    try root.put(allocator, "targets", .{ .array = value.newArray(allocator) });
-    try root.put(allocator, "files", .{ .object = .empty });
+    try root.put(allocator, "targets", .{
+        .array = value.newArray(allocator),
+    });
+    try root.put(allocator, "files", .{
+        .object = .empty,
+    });
 
-    try testing.expectEqualStrings("targets: []\nfiles: {}", try yaml.stringify(allocator, .{ .object = root }));
+    try testing.expectEqualStrings("targets: []\nfiles: {}", try yaml.stringify(allocator, .{
+        .object = root,
+    }));
 }
 
 test "stringify renders a scalar on its own" {
@@ -414,6 +440,21 @@ test "stringify renders a scalar on its own" {
     try testing.expectEqualStrings("alpha", try yaml.stringify(allocator, value.str("alpha")));
     try testing.expectEqualStrings("null", try yaml.stringify(allocator, .null));
     try testing.expectEqualStrings("7", try yaml.stringify(allocator, value.int(7)));
+}
+
+test "stringify renders every other kind of scalar on its own" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try testing.expectEqualStrings("true", try yaml.stringify(allocator, value.boolean(true)));
+    try testing.expectEqualStrings("false", try yaml.stringify(allocator, value.boolean(false)));
+    try testing.expectEqualStrings("1.5", try yaml.stringify(allocator, .{
+        .float = 1.5,
+    }));
+    try testing.expectEqualStrings("12345678901234567890", try yaml.stringify(allocator, .{
+        .number_string = "12345678901234567890",
+    }));
 }
 
 test "stringify then parse gives back the same document" {
@@ -427,17 +468,91 @@ test "stringify then parse gives back the same document" {
     try target.put(allocator, "previousHash", value.str(""));
 
     var targets = value.newArray(allocator);
-    try targets.append(.{ .object = target });
+    try targets.append(.{
+        .object = target,
+    });
 
     var root: value.Object = .empty;
     try root.put(allocator, "fileCount", value.int(9));
-    try root.put(allocator, "targets", .{ .array = targets });
+    try root.put(allocator, "targets", .{
+        .array = targets,
+    });
 
-    const round_tripped = try parseForTest(allocator, try yaml.stringify(allocator, .{ .object = root }));
+    const round_tripped = try parseForTest(allocator, try yaml.stringify(allocator, .{
+        .object = root,
+    }));
 
     try testing.expectEqual(@as(i64, 9), value.get(round_tripped, "fileCount").?.integer);
     const first = value.get(round_tripped, "targets").?.array.items[0];
     try testing.expectEqualStrings("unit", value.get(first, "name").?.string);
     try testing.expectEqual(true, value.get(first, "appliesHere").?.bool);
     try testing.expectEqualStrings("", value.get(first, "previousHash").?.string);
+}
+
+test "Flow.fail records the largest column rather than crashing when the column would overflow" {
+    var parser: yaml.Parser = .{
+        .allocator = testing.allocator,
+        .lines = &.{},
+    };
+    var flow: yaml.Flow = .{
+        .parser = &parser,
+        .text = "[",
+        .line = 1,
+        .column = std.math.maxInt(usize),
+        .at = 1,
+    };
+
+    try testing.expectEqual(error.Syntax, flow.fail("Unclosed flow sequence."));
+    try testing.expectEqual(@as(usize, std.math.maxInt(usize)), parser.err.?.column);
+}
+
+test "Flow.parseQuoted with nothing left to read is a syntax error" {
+    var parser: yaml.Parser = .{
+        .allocator = testing.allocator,
+        .lines = &.{},
+    };
+    for ([_]usize{ 0, 1 }) |at| {
+        parser.err = null;
+        var flow: yaml.Flow = .{
+            .parser = &parser,
+            .text = if (at == 0) "" else "\"",
+            .line = 1,
+            .column = 1,
+            .at = at,
+        };
+
+        try testing.expectError(error.Syntax, flow.parseQuoted());
+        try testing.expectEqualStrings("expected a quoted string", parser.err.?.message);
+    }
+}
+
+test "writeNode writes a sequence item at the largest indent rather than crashing when the indent would overflow" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var items = value.newArray(allocator);
+    try items.append(value.str("alpha"));
+    var out: std.ArrayList(u8) = .empty;
+
+    try yaml.writeNode(&out, allocator, .{
+        .array = items,
+    }, std.math.maxInt(usize), true);
+    try testing.expectEqualStrings("- alpha", out.items);
+}
+
+test "writeIndent writes the number of spaces it is given" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(testing.allocator);
+
+    try yaml.writeIndent(&out, testing.allocator, 4);
+    try testing.expectEqualStrings("    ", out.items);
+}
+
+test "writeIndent writes no more than max_indent spaces" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(testing.allocator);
+
+    try yaml.writeIndent(&out, testing.allocator, std.math.maxInt(usize));
+    try testing.expectEqual(yaml.max_indent, out.items.len);
 }

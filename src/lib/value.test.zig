@@ -27,7 +27,9 @@ test "get reads a field off an object" {
 
     var object: value.Object = .empty;
     try object.put(allocator, "name", value.str("alpha"));
-    const wrapped = value.Value{ .object = object };
+    const wrapped = value.Value{
+        .object = object,
+    };
 
     try testing.expectEqualStrings("alpha", value.get(wrapped, "name").?.string);
     try testing.expect(value.get(wrapped, "missing") == null);
@@ -44,8 +46,12 @@ test "isPlainObject accepts objects and rejects everything else" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    try testing.expect(value.isPlainObject(.{ .object = .empty }));
-    try testing.expect(!value.isPlainObject(.{ .array = value.newArray(allocator) }));
+    try testing.expect(value.isPlainObject(.{
+        .object = .empty,
+    }));
+    try testing.expect(!value.isPlainObject(.{
+        .array = value.newArray(allocator),
+    }));
     try testing.expect(!value.isPlainObject(.null));
     try testing.expect(!value.isPlainObject(value.str("text")));
     try testing.expect(!value.isPlainObject(value.int(3)));
@@ -61,10 +67,14 @@ test "describe renders values compactly, for dropping into a message" {
     try testing.expectEqualStrings("\"alpha\"", try value.describe(allocator, value.str("alpha")));
     try testing.expectEqualStrings("7", try value.describe(allocator, value.int(7)));
     try testing.expectEqualStrings("true", try value.describe(allocator, value.boolean(true)));
-    try testing.expectEqualStrings("[]", try value.describe(allocator, .{ .array = value.newArray(allocator) }));
+    try testing.expectEqualStrings("[]", try value.describe(allocator, .{
+        .array = value.newArray(allocator),
+    }));
 
     var array = value.newArray(allocator);
     try array.append(value.int(1));
     try array.append(value.str("two"));
-    try testing.expectEqualStrings("[1,\"two\"]", try value.describe(allocator, .{ .array = array }));
+    try testing.expectEqualStrings("[1,\"two\"]", try value.describe(allocator, .{
+        .array = array,
+    }));
 }

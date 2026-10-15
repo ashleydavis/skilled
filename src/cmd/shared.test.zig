@@ -3,10 +3,11 @@
 //
 
 const std = @import("std");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const shared = @import("shared.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "contentDir with local returns that path" {
     var scenario = try harness.Scenario.create();
@@ -14,11 +15,11 @@ test "contentDir with local returns that path" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const ctx = scenario.context();
-    const dest = try shared.contentDir(&ctx, .{
+    const dest = try expect_result.ok(try shared.contentDir(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .local = local,
-    });
+    }));
     try testing.expectEqualStrings(local, dest);
 }
 
@@ -27,10 +28,10 @@ test "contentDir without local or branch returns the default branch store dest" 
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    const dest = try shared.contentDir(&ctx, .{
+    const dest = try expect_result.ok(try shared.contentDir(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
-    });
+    }));
     const expected = try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "store", "github.com", "acme", "skills@main",
     });
@@ -42,11 +43,11 @@ test "contentDir with a branch returns that branch's store dest" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    const dest = try shared.contentDir(&ctx, .{
+    const dest = try expect_result.ok(try shared.contentDir(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .branch = "dev",
-    });
+    }));
     const expected = try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "store", "github.com", "acme", "skills@dev",
     });
@@ -59,8 +60,8 @@ test "resolveLocal errors on a missing path" {
 
     const ctx = scenario.context();
     const missing = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, "gone" });
-    try testing.expectError(error.Failed, shared.resolveLocal(&ctx, missing));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "directory") != null);
+    const why = try expect_result.failed(try shared.resolveLocal(&ctx, missing));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "directory") != null);
 }
 
 test "resolveLocal errors on a directory without .git" {
@@ -74,8 +75,8 @@ test "resolveLocal errors on a directory without .git" {
     try skilled.files.writeFile(scenario.io(), skill, "# Hello\n");
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, shared.resolveLocal(&ctx, dest));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "git") != null);
+    const why = try expect_result.failed(try shared.resolveLocal(&ctx, dest));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "git") != null);
 }
 
 test "resolveLocal errors on a git dir that fails package.scan" {
@@ -87,8 +88,8 @@ test "resolveLocal errors on a git dir that fails package.scan" {
     try skilled.files.makeDirPath(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ dest, ".git" }));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, shared.resolveLocal(&ctx, dest));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "skills/") != null);
+    const why = try expect_result.failed(try shared.resolveLocal(&ctx, dest));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "skills/") != null);
 }
 
 test "ensureCloned missing dest without branch clones the default branch" {
@@ -98,7 +99,7 @@ test "ensureCloned missing dest without branch clones the default branch" {
     const ctx = scenario.context();
     var spinner = shared.newSpinner(&ctx);
     defer spinner.finish();
-    const resolved = try shared.ensureCloned(&ctx, "acme/skills", null, &spinner);
+    const resolved = try expect_result.ok(try shared.ensureCloned(&ctx, "acme/skills", null, &spinner));
 
     try testing.expect(cloneHasBranch(&scenario.git, skilled.config.default_branch));
     try testing.expectEqualStrings(skilled.config.default_branch, resolved.branch);
@@ -111,7 +112,7 @@ test "ensureCloned missing dest with branch includes --branch" {
     const ctx = scenario.context();
     var spinner = shared.newSpinner(&ctx);
     defer spinner.finish();
-    _ = try shared.ensureCloned(&ctx, "acme/skills", "feature", &spinner);
+    _ = try expect_result.ok(try shared.ensureCloned(&ctx, "acme/skills", "feature", &spinner));
 
     try testing.expect(cloneHasBranch(&scenario.git, "feature"));
 }
@@ -123,13 +124,13 @@ test "ensureCloned with a branch clones its own dest and leaves the default clon
     const ctx = scenario.context();
     var first = shared.newSpinner(&ctx);
     defer first.finish();
-    const default_clone = try shared.ensureCloned(&ctx, "acme/skills", null, &first);
+    const default_clone = try expect_result.ok(try shared.ensureCloned(&ctx, "acme/skills", null, &first));
     const clones_after_first = countArgv(&scenario.git, "clone");
 
     const again = scenario.context();
     var second = shared.newSpinner(&again);
     defer second.finish();
-    const branch_clone = try shared.ensureCloned(&again, "acme/skills", "feature", &second);
+    const branch_clone = try expect_result.ok(try shared.ensureCloned(&again, "acme/skills", "feature", &second));
 
     try testing.expect(!std.mem.eql(u8, default_clone.dest, branch_clone.dest));
     try testing.expectEqual(clones_after_first + 1, countArgv(&scenario.git, "clone"));
@@ -143,13 +144,13 @@ test "ensureCloned existing branch dest does not clone again" {
     const ctx = scenario.context();
     var first = shared.newSpinner(&ctx);
     defer first.finish();
-    _ = try shared.ensureCloned(&ctx, "acme/skills", "feature", &first);
+    _ = try expect_result.ok(try shared.ensureCloned(&ctx, "acme/skills", "feature", &first));
     const clones_after_first = countArgv(&scenario.git, "clone");
 
     const again = scenario.context();
     var second = shared.newSpinner(&again);
     defer second.finish();
-    const resolved = try shared.ensureCloned(&again, "acme/skills", "feature", &second);
+    const resolved = try expect_result.ok(try shared.ensureCloned(&again, "acme/skills", "feature", &second));
 
     try testing.expectEqual(clones_after_first, countArgv(&scenario.git, "clone"));
     try testing.expect(!resolved.cloned);
@@ -162,7 +163,7 @@ test "ensureCloned refuses a branch that is not a valid name" {
     const ctx = scenario.context();
     var spinner = shared.newSpinner(&ctx);
     defer spinner.finish();
-    try testing.expectError(error.Failed, shared.ensureCloned(&ctx, "acme/skills", "../escape", &spinner));
+    _ = try expect_result.failed(try shared.ensureCloned(&ctx, "acme/skills", "../escape", &spinner));
     try testing.expect(!cloneRan(&scenario.git));
 }
 
@@ -209,17 +210,18 @@ test "requireOneMatch refuses the scratch namespace even when packages exist" {
     defer scenario.destroy();
 
     const packages = [_]skilled.config.Package{
-        .{ .repo = "acme/skills", .namespace = "demo" },
+        .{
+            .repo = "acme/skills",
+            .namespace = "demo",
+        },
     };
-    const ctx = scenario.context();
-    try testing.expectError(error.Failed, shared.requireOneMatch(
+    const why = try expect_result.failed(try shared.requireOneMatch(
         scenario.allocator(),
         &packages,
         skilled.scratch.namespace,
-        ctx.fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "no package matching") == null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "scratch directory") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "no package matching") == null);
 }
 
 test "syncScratch creates the links and prints the scratch path" {
@@ -228,12 +230,14 @@ test "syncScratch creates the links and prints the scratch path" {
 
     const ctx = scenario.context();
     const scope = try shared.scopeOf(&ctx, false);
-    try shared.syncScratch(&ctx, scope);
+    try expect_result.ok(try shared.syncScratch(&ctx, scope));
 
     const link_path = try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.cwd, ".claude", "skills", skilled.scratch.namespace,
     });
-    const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), scope.scratch_dir) != null);
 }

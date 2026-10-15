@@ -11,8 +11,7 @@
 // shorts (`-gn`), variadic options, and negatable `--no-` forms (`--no-color` is its own flag).
 //
 // What IS reproduced exactly is the wording of the errors and the layout of the help, because a
-// shell script driving this cannot be allowed to tell the difference. `scripts/smoke-tests.sh`
-// asserts on both.
+// shell script driving this cannot be allowed to tell the difference.
 //
 // The one thing commander does that cannot be copied is the closure: its actions capture whatever
 // the surrounding function had, and a Zig function pointer captures nothing. So an action takes a
@@ -28,39 +27,48 @@ const std = @import("std");
 const term = @import("term.zig");
 
 //
+// How a refused command line or a refused action says why.
+//
+const failure = @import("failure.zig");
+
+//
 // How wide the left column of the help is before a description starts.
 //
 // The help is laid out in two columns with the right one wrapped. The number is what commander's
-// own output measures, which is what the smoke tests assert against.
+// own output measures.
 //
 const HELP_TERM_WIDTH = 19;
 
 //
 // How wide the help is allowed to get before a description wraps.
-// Public only so the tests in commander.test.zig can reach it. Nothing else calls it.
-//
 //
 pub const HELP_TOTAL_WIDTH = 80;
 
 //
-// What went wrong on the command line.
+// What a parse ended in.
 //
-// These are commander's own failure modes, kept apart because the CLI turns them into different exit
+// These are commander's own endings, kept apart because the CLI turns them into different exit
 // codes: asking for help is a success, and getting the command line wrong is not.
 //
-pub const Error = error{
+pub const Outcome = union(enum) {
     //
     // Help or the version was printed. Commander calls these `commander.helpDisplayed` and
     // `commander.version`, and the CLI exits 0 for both.
     //
-    Displayed,
+    displayed,
 
     //
-    // The command line was wrong: an unknown option or command, a missing option value, or an
-    // argument too many. Commander's `commander.unknownOption` and friends, all of which exit 1.
+    // The chosen action ran, and this is the exit code it gave.
     //
-    Refused,
-} || std.mem.Allocator.Error;
+    ran: u8,
+
+    //
+    // The command line was wrong (an unknown option or command, a missing option value, or an
+    // argument too many, which are commander's `commander.unknownOption` and friends), or the
+    // action refused. The CLI prints the message and exits 1.
+    //
+    refused: failure.Failure,
+};
 
 //
 // One option an action can read: a `--name <value>` or a boolean flag with no placeholder.
@@ -106,7 +114,7 @@ pub const Option = struct {
     // True when the flags string names a value, such as "--ns <namespace>".
     //
     // A flags string with no `<placeholder>` is a boolean: presence stores "true", absence is null
-    // unless a default was set. Public so the tests in commander.test.zig can reach it.
+    // unless a default was set.
     //
     pub fn takesValue(self: Option) bool {
         return std.mem.indexOfScalar(u8, self.flags, '<') != null;
@@ -151,11 +159,6 @@ pub const Invocation = struct {
     values: std.StringArrayHashMapUnmanaged([]const u8),
 
     //
-    // What the process should exit with. An action sets it, and `parse` hands it back to `main`.
-    //
-    exit_code: u8 = 0,
-
-    //
     // The value of an option, or null when it was not given and has no default.
     //
     pub fn option(self: *const Invocation, name: []const u8) ?[]const u8 {
@@ -164,14 +167,16 @@ pub const Invocation = struct {
 };
 
 //
-// What an action is: a function, and the context it was registered with.
+// What an action is: a function, and the context it was registered with. It returns the exit code
+// the process should end with, or the failure that says why it refused.
 //
-pub const ActionFn = *const fn (invocation: *Invocation) anyerror!void;
+pub const ActionFn = *const fn (invocation: *const Invocation) std.mem.Allocator.Error!failure.Result(u8);
 
 //
 // One command, and everything it was defined with.
 //
-// Every builder method returns the command, so a whole definition is one chain of calls.
+// The builder methods that only set a field return the command, so they chain. The ones that
+// allocate return an error the caller passes on with `try`.
 //
 pub const Command = struct {
     allocator: std.mem.Allocator,
@@ -226,7 +231,10 @@ pub const Command = struct {
     // Whether help is painted, and with what. Off by default so a command built without a style
     // renders the same plain text it always did.
     //
-    help_style: term.Style = .{ .color = false, .icons = false },
+    help_style: term.Style = .{
+        .color = false,
+        .icons = false,
+    },
 
     //
     // Extra text printed after the help, such as the examples under the program's own usage.
@@ -259,15 +267,16 @@ pub const Command = struct {
     //
     // Makes a command.
     //
-    // Panics if there is no memory, rather than returning an error, which is what every builder
-    // method below does too. The command tree is built once at startup out of string literals: if
-    // that cannot be allocated then nothing else in the run was going to work either, and returning
-    // an error here would only mean a `try` on every call and no chaining, which is the whole point
-    // of writing it this way.
+    // The builder methods that only set a field return the command, so they chain. The ones that
+    // allocate (`option`, `alias`, `addCommand` and `command`) can run out of memory and return the
+    // error instead, so each is a `try` of its own.
     //
-    pub fn init(allocator: std.mem.Allocator, command_name: []const u8) *Command {
-        const created = allocator.create(Command) catch @panic("out of memory building the command line");
-        created.* = .{ .allocator = allocator, .command_name = command_name };
+    pub fn init(allocator: std.mem.Allocator, command_name: []const u8) std.mem.Allocator.Error!*Command {
+        const created = try allocator.create(Command);
+        created.* = .{
+            .allocator = allocator,
+            .command_name = command_name,
+        };
         return created;
     }
 
@@ -294,29 +303,30 @@ pub const Command = struct {
     // Adds an option. A null `default_value` means the option has no default, so reading it when it
     // was not given answers null.
     //
-    pub fn option(self: *Command, flags: []const u8, text: []const u8, default_value: ?[]const u8) *Command {
-        self.options.append(self.allocator, .{
+    pub fn option(self: *Command, flags: []const u8, text: []const u8, default_value: ?[]const u8) std.mem.Allocator.Error!void {
+        try self.options.append(self.allocator, .{
             .flags = flags,
             .description = text,
             .default_value = default_value,
-        }) catch @panic("out of memory building the command line");
-        return self;
+        });
     }
 
     //
     // Declares the positional argument this command takes.
     //
     pub fn argument(self: *Command, spec: []const u8, text: []const u8) *Command {
-        self.argument_spec = .{ .spec = spec, .description = text };
+        self.argument_spec = .{
+            .spec = spec,
+            .description = text,
+        };
         return self;
     }
 
     //
     // Adds another word that means this command.
     //
-    pub fn alias(self: *Command, text: []const u8) *Command {
-        self.aliases.append(self.allocator, text) catch @panic("out of memory building the command line");
-        return self;
+    pub fn alias(self: *Command, text: []const u8) std.mem.Allocator.Error!void {
+        try self.aliases.append(self.allocator, text);
     }
 
     //
@@ -370,13 +380,6 @@ pub const Command = struct {
     }
 
     //
-    // Adds a subcommand that was built elsewhere. `program.addCommand(buildSummaryCommand())`.
-    //
-    // Returns nothing, unlike every other builder method here. Commander returns the parent so the
-    // call can be chained, but nothing ever chains off it: a program adds its subcommands as a list
-    // of statements. Returning the parent would only mean a `_ =` on every one of those lines.
-    //
-    //
     // Paints help with this style, and hands it to every subcommand added afterwards.
     //
     pub fn style(self: *Command, value: term.Style) *Command {
@@ -384,10 +387,17 @@ pub const Command = struct {
         return self;
     }
 
-    pub fn addCommand(self: *Command, sub: *Command) void {
+    //
+    // Adds a subcommand that was built elsewhere. `try program.addCommand(try buildSummaryCommand())`.
+    //
+    // Returns nothing but the error of an allocation that failed. Commander returns the parent so
+    // the call can be chained, but nothing ever chains off it: a program adds its subcommands as a
+    // list of statements.
+    //
+    pub fn addCommand(self: *Command, sub: *Command) std.mem.Allocator.Error!void {
         sub.parent = self;
         sub.help_style = self.help_style;
-        self.subcommands.append(self.allocator, sub) catch @panic("out of memory building the command line");
+        try self.subcommands.append(self.allocator, sub);
     }
 
     //
@@ -395,9 +405,9 @@ pub const Command = struct {
     // commander's `cmd.command("capture")`, and it returns the child rather than the parent, which
     // is the one place chaining changes what it is chaining on.
     //
-    pub fn command(self: *Command, sub_name: []const u8) *Command {
-        const sub = Command.init(self.allocator, sub_name);
-        self.addCommand(sub);
+    pub fn command(self: *Command, sub_name: []const u8) std.mem.Allocator.Error!*Command {
+        const sub = try Command.init(self.allocator, sub_name);
+        try self.addCommand(sub);
         return sub;
     }
 
@@ -497,10 +507,10 @@ fn versionTextOnChain(command: *const Command) ?[]const u8 {
 //
 // A fresh root command, the way commander exports a ready-made `program`.
 //
-// Commander's is a module-level singleton. This one is made per call, because it needs an allocator
-// and because a singleton would make two programs in one test share state.
+// Commander's is a module-level singleton. This one is made per call, because it needs an
+// allocator.
 //
-pub fn program(allocator: std.mem.Allocator) *Command {
+pub fn program(allocator: std.mem.Allocator) std.mem.Allocator.Error!*Command {
     return Command.init(allocator, "");
 }
 
@@ -537,44 +547,13 @@ pub fn isVariadic(spec: []const u8) bool {
 }
 
 //
-// Where a parse writes its output and its failure message.
-//
-// Commander prints straight to the console. This takes a writer instead, so the whole of a parse can
-// be exercised by a test that reads what it produced rather than capturing the process's handles.
-//
-pub const Program = struct {
-    //
-    // Where help and version output goes.
-    //
-    out: *std.Io.Writer,
-
-    //
-    // Where the message goes when the command line is refused. Filled in by the parse; the CLI
-    // prints it.
-    //
-    message: ?[]const u8 = null,
-
-    //
-    // What the chosen action set as the exit code.
-    //
-    exit_code: u8 = 0,
-
-    //
-    // Records why the command line was refused, in commander's wording.
-    //
-    fn refuse(self: *Program, allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) Error {
-        self.message = std.fmt.allocPrint(allocator, fmt, args) catch return error.OutOfMemory;
-        return error.Refused;
-    }
-};
-
-//
 // Runs a command line against a command tree, the way `program.parseAsync(process.argv)` does.
 //
 // `argv` is the arguments after the program's own name, which is what commander is handed once it
-// has stripped the node executable and the script.
+// has stripped the node executable and the script. Help and version output go to `out`; commander
+// prints straight to the console.
 //
-pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!void {
+pub fn parse(out: *std.Io.Writer, root: *Command, argv: []const []const u8) std.mem.Allocator.Error!Outcome {
     const allocator = root.allocator;
 
     var current = root;
@@ -598,16 +577,18 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
 
         if (!options_ended and isOption(word)) {
             if (current.isHelpFlag(word)) {
-                try writeHelp(runner.out, current, allocator);
-                return error.Displayed;
+                try writeHelp(out, current, allocator);
+                return .displayed;
             }
             if (versionTextForFlag(current, word)) |text| {
-                runner.out.print("{s}\n", .{text}) catch {};
-                return error.Displayed;
+                out.print("{s}\n", .{text}) catch {};
+                return .displayed;
             }
 
             const found = current.findOption(word) orelse {
-                return runner.refuse(allocator, "Unknown option '{s}'.", .{word});
+                return .{
+                    .refused = failure.because("Unknown option '{s}'.", .{word}),
+                };
             };
 
             if (!found.takesValue()) {
@@ -617,7 +598,9 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
 
             at += 1;
             if (at >= argv.len) {
-                return runner.refuse(allocator, "Option '{s}' is missing its argument.", .{found.flags});
+                return .{
+                    .refused = failure.because("Option '{s}' is missing its argument.", .{found.flags}),
+                };
             }
             try values.put(allocator, found.name(), argv[at]);
             continue;
@@ -641,17 +624,19 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
                 var target: *const Command = current;
                 if (at + 1 < argv.len and !isOption(argv[at + 1])) {
                     target = current.findSubcommand(argv[at + 1]) orelse {
-                        return runner.refuse(allocator, "Unknown command '{s}'.", .{argv[at + 1]});
+                        return .{
+                            .refused = failure.because("Unknown command '{s}'.", .{argv[at + 1]}),
+                        };
                     };
                 }
-                try writeHelp(runner.out, target, allocator);
-                return error.Displayed;
+                try writeHelp(out, target, allocator);
+                return .displayed;
             }
 
             if (current.subcommands.items.len > 0 and std.mem.eql(u8, word, "version")) {
                 if (versionTextOnChain(current)) |text| {
-                    runner.out.print("{s}\n", .{text}) catch {};
-                    return error.Displayed;
+                    out.print("{s}\n", .{text}) catch {};
+                    return .displayed;
                 }
             }
         }
@@ -662,13 +647,19 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
             // it an unknown command; otherwise it is one argument too many.
             //
             if (current.subcommands.items.len > 0) {
-                return runner.refuse(allocator, "Unknown command '{s}'.", .{word});
+                return .{
+                    .refused = failure.because("Unknown command '{s}'.", .{word}),
+                };
             }
-            return runner.refuse(allocator, "Too many arguments: expected 0 but got {d}.", .{argv.len - at});
+            return .{
+                .refused = failure.because("Too many arguments: expected 0 but got {d}.", .{argv.len - at}),
+            };
         }
 
         if (positionals.items.len > 0 and !isVariadic(current.argument_spec.?.spec)) {
-            return runner.refuse(allocator, "Too many arguments: expected 1 but got {d}.", .{positionals.items.len + 1});
+            return .{
+                .refused = failure.because("Too many arguments: expected 1 but got {d}.", .{positionals.items.len + 1}),
+            };
         }
 
         try positionals.append(allocator, word);
@@ -695,29 +686,24 @@ pub fn parse(runner: *Program, root: *Command, argv: []const []const u8) Error!v
     // does for a bare `skl` or a group with no action.
     //
     const run = current.action_fn orelse {
-        try writeHelp(runner.out, current, allocator);
-        return error.Displayed;
+        try writeHelp(out, current, allocator);
+        return .displayed;
     };
 
-    var invocation = Invocation{
+    const invocation = Invocation{
         .context = current.action_context.?,
         .args = positionals.items,
         .values = values,
     };
 
-    run(&invocation) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => {
-            //
-            // An action that failed has already put its message where the CLI will find it. What
-            // reaches here is only the fact that it failed.
-            //
-            runner.exit_code = 1;
-            return error.Refused;
+    return switch (try run(&invocation)) {
+        .ok => |exit_code| .{
+            .ran = exit_code,
+        },
+        .failed => |why| .{
+            .refused = why,
         },
     };
-
-    runner.exit_code = invocation.exit_code;
 }
 
 //
@@ -731,7 +717,7 @@ pub fn writeHelp(out: *std.Io.Writer, command: *const Command, allocator: std.me
 //
 // Renders a command's help as text.
 //
-// Returned rather than printed so a test can read the whole thing, and so the CLI's `outputHelp`
+// Returned rather than printed so the CLI's `outputHelp`
 // and a `--help` on the command line produce the identical bytes.
 //
 pub fn renderHelp(allocator: std.mem.Allocator, command: *const Command) std.mem.Allocator.Error![]const u8 {
@@ -873,8 +859,11 @@ fn writeTwoColumn(
 //
 // Writes text, wrapping it at the help's width and indenting every line after the first.
 //
-fn writeWrapped(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8, indent: usize) std.mem.Allocator.Error!void {
-    const width = HELP_TOTAL_WIDTH - indent;
+pub fn writeWrapped(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8, indent: usize) std.mem.Allocator.Error!void {
+    //
+    // An indent past the width leaves no room, so every word goes on a line of its own.
+    //
+    const width = HELP_TOTAL_WIDTH -| indent;
 
     var column: usize = 0;
     var words = std.mem.splitScalar(u8, text, ' ');

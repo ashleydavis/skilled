@@ -2,7 +2,7 @@
 // The stderr spinner drawn while clone and link run.
 //
 // Writes a single line and clears it on finish. A no-op when non-interactive, stderr is not a TTY,
-// or color is off. Never writes to stdout. The writer is passed in so a test can capture the bytes.
+// or color is off. Never writes to stdout.
 //
 
 const std = @import("std");
@@ -35,13 +35,13 @@ const text_cap = 256;
 //
 // A single-line spinner written to stderr while clone and link run.
 //
-// The writer is passed in rather than taken from the process, so a test can capture the bytes and
-// the CLI can point it at stderr. Writes are swallowed: a broken pipe on the progress line must
-// not fail the clone that is still running.
+// The writer is passed in rather than taken from the process, so the CLI can point it at stderr.
+// Writes are swallowed: a broken pipe on the progress line must not fail the clone that is still
+// running.
 //
 pub const Progress = struct {
     //
-    // Where the line is written. Stderr in the CLI; a growing buffer in tests.
+    // Where the line is written. Stderr in the CLI.
     //
     writer: *std.Io.Writer,
 

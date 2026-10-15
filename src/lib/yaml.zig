@@ -22,7 +22,6 @@ const value = @import("value.zig");
 const failure = @import("failure.zig");
 
 const Value = value.Value;
-const Failure = failure.Failure;
 
 //
 // A syntax error, carrying where it happened so the message can point at the line.
@@ -42,6 +41,37 @@ pub const SyntaxError = struct {
     // The 1-based column the problem is at.
     //
     column: usize,
+};
+
+//
+// What `parse` returns: the value the text holds, or the syntax error that stopped it.
+//
+pub const Parsed = union(enum) {
+    //
+    // The value the text holds.
+    //
+    ok: Value,
+
+    //
+    // What is wrong with the text and where.
+    //
+    invalid: SyntaxError,
+};
+
+//
+// What `readLines` returns: the lines the parser walks, or the syntax error found while splitting
+// them.
+//
+const Lines = union(enum) {
+    //
+    // The lines, with blanks and comments dropped.
+    //
+    ok: []Line,
+
+    //
+    // What is wrong with the text and where.
+    //
+    invalid: SyntaxError,
 };
 
 //
@@ -67,7 +97,7 @@ const Line = struct {
 //
 // The parser's state: the lines to read and how far through them it is.
 //
-const Parser = struct {
+pub const Parser = struct {
     allocator: std.mem.Allocator,
 
     //
@@ -81,14 +111,18 @@ const Parser = struct {
     index: usize = 0,
     err: ?SyntaxError = null,
 
-    const Error = error{ Syntax, OutOfMemory };
+    pub const Error = error{ Syntax, OutOfMemory };
 
     //
     // Records a syntax error and returns the error to return.
     //
     fn syntax(self: *Parser, line: usize, column: usize, message: []const u8) Error {
         if (self.err == null) {
-            self.err = .{ .message = message, .line = line, .column = column };
+            self.err = .{
+                .message = message,
+                .line = line,
+                .column = column,
+            };
         }
         return error.Syntax;
     }
@@ -147,7 +181,11 @@ const Parser = struct {
                 // the dash, so measuring this line by its dash would make every one of them look
                 // over-indented.
                 //
-                self.lines[self.index] = .{ .indent = item_column, .content = after_dash, .number = line.number };
+                self.lines[self.index] = .{
+                    .indent = item_column,
+                    .content = after_dash,
+                    .number = line.number,
+                };
                 try array.append(try self.parseBlock(item_column));
             } else {
                 //
@@ -160,7 +198,9 @@ const Parser = struct {
             try self.rejectDanglingIndent(indent);
         }
 
-        return .{ .array = array };
+        return .{
+            .array = array,
+        };
     }
 
     //
@@ -192,7 +232,9 @@ const Parser = struct {
             try self.rejectDanglingIndent(indent);
         }
 
-        return .{ .object = object };
+        return .{
+            .object = object,
+        };
     }
 
     //
@@ -249,7 +291,12 @@ const Parser = struct {
 
         switch (trimmed[0]) {
             '[', '{' => {
-                var flow = Flow{ .parser = self, .text = trimmed, .line = line, .column = column };
+                var flow = Flow{
+                    .parser = self,
+                    .text = trimmed,
+                    .line = line,
+                    .column = column,
+                };
                 const parsed = try flow.parseValue();
                 flow.skipSpaces();
                 if (flow.at < flow.text.len) {
@@ -258,7 +305,12 @@ const Parser = struct {
                 return parsed;
             },
             '"', '\'' => {
-                var flow = Flow{ .parser = self, .text = trimmed, .line = line, .column = column };
+                var flow = Flow{
+                    .parser = self,
+                    .text = trimmed,
+                    .line = line,
+                    .column = column,
+                };
                 const parsed = try flow.parseQuoted();
                 flow.skipSpaces();
                 if (flow.at < flow.text.len) {
@@ -288,7 +340,9 @@ const Parser = struct {
 
         if (looksLikeFloat(text)) {
             if (std.fmt.parseFloat(f64, text)) |number| {
-                return .{ .float = number };
+                return .{
+                    .float = number,
+                };
             } else |_| {}
         }
 
@@ -300,7 +354,7 @@ const Parser = struct {
 // Parses a flow collection or quoted scalar: the bracketed, comma-separated form that fits on one
 // line, such as `[]`, `[a, b]` or `{ name: alpha }`.
 //
-const Flow = struct {
+pub const Flow = struct {
     parser: *Parser,
     text: []const u8,
     line: usize,
@@ -313,8 +367,8 @@ const Flow = struct {
         }
     }
 
-    fn fail(self: *Flow, message: []const u8) Parser.Error {
-        return self.parser.syntax(self.line, self.column + self.at, message);
+    pub fn fail(self: *Flow, message: []const u8) Parser.Error {
+        return self.parser.syntax(self.line, self.column +| self.at, message);
     }
 
     //
@@ -342,7 +396,9 @@ const Flow = struct {
         self.skipSpaces();
         if (self.at < self.text.len and self.text[self.at] == ']') {
             self.at += 1;
-            return .{ .array = array };
+            return .{
+                .array = array,
+            };
         }
 
         while (true) {
@@ -353,7 +409,9 @@ const Flow = struct {
                 ',' => self.at += 1,
                 ']' => {
                     self.at += 1;
-                    return .{ .array = array };
+                    return .{
+                        .array = array,
+                    };
                 },
                 else => return self.fail("expected a \",\" or a \"]\" in this list"),
             }
@@ -370,7 +428,9 @@ const Flow = struct {
         self.skipSpaces();
         if (self.at < self.text.len and self.text[self.at] == '}') {
             self.at += 1;
-            return .{ .object = object };
+            return .{
+                .object = object,
+            };
         }
 
         while (true) {
@@ -392,7 +452,9 @@ const Flow = struct {
                 ',' => self.at += 1,
                 '}' => {
                     self.at += 1;
-                    return .{ .object = object };
+                    return .{
+                        .object = object,
+                    };
                 },
                 else => return self.fail("expected a \",\" or a \"}\" in this mapping"),
             }
@@ -403,9 +465,13 @@ const Flow = struct {
     // Parses a quoted string, single or double.
     //
     // Double quotes take backslash escapes. Single quotes take none, except that two single quotes
-    // in a row mean one literal quote, which is how YAML spells it.
+    // in a row mean one literal quote, which is how YAML spells it. With nothing left to read, it
+    // is the syntax error a missing value is.
     //
-    fn parseQuoted(self: *Flow) Parser.Error!Value {
+    pub fn parseQuoted(self: *Flow) Parser.Error!Value {
+        if (self.at >= self.text.len) {
+            return self.fail("expected a quoted string");
+        }
         const quote = self.text[self.at];
         self.at += 1;
 
@@ -500,7 +566,10 @@ pub fn splitMappingEntry(content: []const u8) ?MappingEntry {
         if (character == ':' and (at + 1 == content.len or content[at + 1] == ' ')) {
             const key = std.mem.trim(u8, content[0..at], " ");
             if (key.len == 0) return null;
-            return .{ .key = key, .rest = std.mem.trim(u8, content[at + 1 ..], " ") };
+            return .{
+                .key = key,
+                .rest = std.mem.trim(u8, content[at + 1 ..], " "),
+            };
         }
     }
 
@@ -610,7 +679,7 @@ pub fn stripComment(content: []const u8) []const u8 {
 // Splits the text into the lines the parser walks, dropping blanks and comments and measuring each
 // remaining line's indentation.
 //
-fn readLines(allocator: std.mem.Allocator, text: []const u8, err: *?SyntaxError) error{ Syntax, OutOfMemory }![]Line {
+fn readLines(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error!Lines {
     var lines: std.ArrayList(Line) = .empty;
     errdefer lines.deinit(allocator);
 
@@ -628,8 +697,13 @@ fn readLines(allocator: std.mem.Allocator, text: []const u8, err: *?SyntaxError)
         // width for it would mean this tool and every editor disagreeing about what the file says.
         //
         if (indent < line.len and line[indent] == '\t') {
-            err.* = .{ .message = "a tab is used for indentation, which YAML does not allow", .line = number, .column = indent + 1 };
-            return error.Syntax;
+            return .{
+                .invalid = .{
+                    .message = "a tab is used for indentation, which YAML does not allow",
+                    .line = number,
+                    .column = indent + 1,
+                },
+            };
         }
 
         const content = stripComment(line[indent..]);
@@ -643,34 +717,60 @@ fn readLines(allocator: std.mem.Allocator, text: []const u8, err: *?SyntaxError)
         if (std.mem.eql(u8, content, "...")) continue;
         if (std.mem.eql(u8, content, "---")) {
             if (lines.items.len > 0) {
-                err.* = .{ .message = "more than one document in the file, which this parser does not support", .line = number, .column = indent + 1 };
-                return error.Syntax;
+                return .{
+                    .invalid = .{
+                        .message = "more than one document in the file, which this parser does not support",
+                        .line = number,
+                        .column = indent + 1,
+                    },
+                };
             }
             continue;
         }
 
-        try lines.append(allocator, .{ .indent = indent, .content = content, .number = number });
+        try lines.append(allocator, .{
+            .indent = indent,
+            .content = content,
+            .number = number,
+        });
     }
 
-    return lines.toOwnedSlice(allocator);
+    return .{
+        .ok = try lines.toOwnedSlice(allocator),
+    };
 }
 
 //
-// Parses YAML text into a dynamic value, reporting where a syntax error is.
+// Parses YAML text into a dynamic value, or the syntax error that says where it went wrong.
 //
 // An empty document is null, which is what the `yaml` package returns and what the config checks
 // then complain about by name.
 //
-pub fn parse(allocator: std.mem.Allocator, text: []const u8, err: *?SyntaxError) error{ Syntax, OutOfMemory }!Value {
-    const lines = try readLines(allocator, text, err);
-    if (lines.len == 0) return .null;
+// The parser below stops at the first syntax error by returning `error.Syntax` and keeps the
+// details on itself. That parser is local to this call, so the details come back in the result and
+// go nowhere else.
+//
+pub fn parse(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error!Parsed {
+    const lines = switch (try readLines(allocator, text)) {
+        .ok => |read| read,
+        .invalid => |why| return .{
+            .invalid = why,
+        },
+    };
+    if (lines.len == 0) {
+        return .{
+            .ok = .null,
+        };
+    }
 
-    var parser = Parser{ .allocator = allocator, .lines = lines };
+    var parser = Parser{
+        .allocator = allocator,
+        .lines = lines,
+    };
     const parsed = parser.parseBlock(lines[0].indent) catch |caught| switch (caught) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.Syntax => {
-            err.* = parser.err;
-            return error.Syntax;
+        error.Syntax => return .{
+            .invalid = parser.err.?,
         },
     };
 
@@ -679,27 +779,35 @@ pub fn parse(allocator: std.mem.Allocator, text: []const u8, err: *?SyntaxError)
     // could not account for. Reported rather than ignored, for the same reason a misaligned key is.
     //
     if (parser.peek()) |line| {
-        err.* = .{ .message = "this line does not belong to the document above it", .line = line.number, .column = line.indent + 1 };
-        return error.Syntax;
+        return .{
+            .invalid = .{
+                .message = "this line does not belong to the document above it",
+                .line = line.number,
+                .column = line.indent + 1,
+            },
+        };
     }
 
-    return parsed;
+    return .{
+        .ok = parsed,
+    };
 }
 
 //
 // Parses YAML text, failing with a message that names the format and points at the line.
 //
-pub fn parseOrFail(allocator: std.mem.Allocator, text: []const u8, description: []const u8, fail: *Failure) failure.Error!Value {
-    var err: ?SyntaxError = null;
-    return parse(allocator, text, &err) catch |caught| switch (caught) {
-        error.OutOfMemory => error.OutOfMemory,
-        error.Syntax => {
-            if (err) |detail| {
-                return fail.set("{s} is not valid YAML: {s} at line {d}, column {d}.", .{
-                    description, detail.message, detail.line, detail.column,
-                });
-            }
-            return fail.set("{s} is not valid YAML.", .{description});
+pub fn parseOrFail(allocator: std.mem.Allocator, text: []const u8, description: []const u8) std.mem.Allocator.Error!failure.Result(Value) {
+    return switch (try parse(allocator, text)) {
+        .ok => |parsed| .{
+            .ok = parsed,
+        },
+        .invalid => |detail| .{
+            .failed = failure.because("{s} is not valid YAML: {s} at line {d}, column {d}.", .{
+                description,
+                detail.message,
+                detail.line,
+                detail.column,
+            }),
         },
     };
 }
@@ -767,21 +875,6 @@ fn writeString(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []co
 }
 
 //
-// Writes a scalar: anything that is not an array or an object.
-//
-fn writeScalar(out: *std.ArrayList(u8), allocator: std.mem.Allocator, node: Value) std.mem.Allocator.Error!void {
-    switch (node) {
-        .null => try out.appendSlice(allocator, "null"),
-        .bool => |flag| try out.appendSlice(allocator, if (flag) "true" else "false"),
-        .integer => |whole| try out.print(allocator, "{d}", .{whole}),
-        .float => |number| try out.print(allocator, "{d}", .{number}),
-        .number_string => |text| try out.appendSlice(allocator, text),
-        .string => |text| try writeString(out, allocator, text),
-        .array, .object => unreachable, // Handled by writeNode.
-    }
-}
-
-//
 // True for a value that is written on the line after its key rather than on the key's own line.
 //
 fn isBlock(node: Value) bool {
@@ -799,7 +892,7 @@ fn isBlock(node: Value) bool {
 // sequence item needs: `- ` is printed, and then the item's first key has to land right after it
 // rather than on a line of its own.
 //
-fn writeNode(out: *std.ArrayList(u8), allocator: std.mem.Allocator, node: Value, indent: usize, first_line_written: bool) std.mem.Allocator.Error!void {
+pub fn writeNode(out: *std.ArrayList(u8), allocator: std.mem.Allocator, node: Value, indent: usize, first_line_written: bool) std.mem.Allocator.Error!void {
     switch (node) {
         .array => |array| {
             if (array.items.len == 0) {
@@ -813,7 +906,7 @@ fn writeNode(out: *std.ArrayList(u8), allocator: std.mem.Allocator, node: Value,
                     try writeIndent(out, allocator, indent);
                 }
                 try out.appendSlice(allocator, "- ");
-                try writeNode(out, allocator, item, indent + 2, true);
+                try writeNode(out, allocator, item, indent +| 2, true);
             }
         },
         .object => |object| {
@@ -834,22 +927,34 @@ fn writeNode(out: *std.ArrayList(u8), allocator: std.mem.Allocator, node: Value,
 
                 if (isBlock(entry.value_ptr.*)) {
                     try out.append(allocator, '\n');
-                    try writeNode(out, allocator, entry.value_ptr.*, indent + 2, false);
+                    try writeNode(out, allocator, entry.value_ptr.*, indent +| 2, false);
                 } else {
                     try out.append(allocator, ' ');
                     try writeNode(out, allocator, entry.value_ptr.*, indent, true);
                 }
             }
         },
-        else => try writeScalar(out, allocator, node),
+        .null => try out.appendSlice(allocator, "null"),
+        .bool => |flag| try out.appendSlice(allocator, if (flag) "true" else "false"),
+        .integer => |whole| try out.print(allocator, "{d}", .{whole}),
+        .float => |number| try out.print(allocator, "{d}", .{number}),
+        .number_string => |text| try out.appendSlice(allocator, text),
+        .string => |text| try writeString(out, allocator, text),
     }
 }
 
 //
-// Writes the given number of spaces.
+// The most spaces one line is indented by: 128 levels of nesting at 2 spaces a level. `skl.yaml`
+// nests two levels, so no document skl writes comes near it.
 //
-fn writeIndent(out: *std.ArrayList(u8), allocator: std.mem.Allocator, indent: usize) std.mem.Allocator.Error!void {
-    try out.appendNTimes(allocator, ' ', indent);
+pub const max_indent: usize = 256;
+
+//
+// Writes the given number of spaces, and no more than `max_indent`, so an indent is never a
+// request for more memory than a line of YAML needs.
+//
+pub fn writeIndent(out: *std.ArrayList(u8), allocator: std.mem.Allocator, indent: usize) std.mem.Allocator.Error!void {
+    try out.appendNTimes(allocator, ' ', @min(indent, max_indent));
 }
 
 //

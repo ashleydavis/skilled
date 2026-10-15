@@ -31,11 +31,6 @@ const link = @import("link.zig");
 const paths = @import("paths.zig");
 
 //
-// Alias so signatures read as Failure rather than failure.Failure.
-//
-const Failure = failure.Failure;
-
-//
 // The namespace the scratch trees are linked under, in both agents.
 //
 // Named once here because three other places depend on it: `config` refuses it as a package
@@ -65,12 +60,28 @@ pub fn ensureTrees(
     io: std.Io,
     allocator: std.mem.Allocator,
     scratch_dir: []const u8,
-    fail: *Failure,
-) failure.Error!bool {
-    const made_root = try link.ensureRealDirectory(io, scratch_dir, fail);
-    const made_skills = try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "skills" }), fail);
-    const made_commands = try link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "commands" }), fail);
-    return made_root or made_skills or made_commands;
+) std.mem.Allocator.Error!failure.Result(bool) {
+    const made_root = switch (link.ensureRealDirectory(io, scratch_dir)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const made_skills = switch (link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "skills" }))) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const made_commands = switch (link.ensureRealDirectory(io, try files.joinPath(allocator, &.{ scratch_dir, "commands" }))) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return .{
+        .ok = made_root or made_skills or made_commands,
+    };
 }
 
 //
@@ -103,11 +114,22 @@ pub fn sync(
     io: std.Io,
     allocator: std.mem.Allocator,
     scope: paths.Scope,
-    fail: *Failure,
-) failure.Error!Status {
-    const made_trees = try ensureTrees(io, allocator, scope.scratch_dir, fail);
-    const linked = try link.linkPackage(io, allocator, scope.scratch_dir, namespace, scope, fail);
-    return if (made_trees or linked == .changed) .changed else .unchanged;
+) std.mem.Allocator.Error!failure.Result(Status) {
+    const made_trees = switch (try ensureTrees(io, allocator, scope.scratch_dir)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const linked = switch (try link.linkPackage(io, allocator, scope.scratch_dir, namespace, scope)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return .{
+        .ok = if (made_trees or linked == .changed) .changed else .unchanged,
+    };
 }
 
 test {

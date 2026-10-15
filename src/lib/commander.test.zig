@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const commander = @import("commander.zig");
+const failure = @import("failure.zig");
 const testing = std.testing;
 
 //
@@ -20,54 +21,60 @@ const Recorder = struct {
 //
 // A test action: records what it was given, the way a real one reads its options.
 //
-fn recordAction(invocation: *commander.Invocation) anyerror!void {
+fn recordAction(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const recorder: *Recorder = @constCast(@ptrCast(@alignCast(invocation.context)));
     recorder.ran = true;
     recorder.args = invocation.args;
     recorder.config = invocation.option("config");
     recorder.output = invocation.option("output");
-    if (recorder.fail) return error.ActionFailed;
-    invocation.exit_code = 0;
+    if (recorder.fail) {
+        return .{
+            .failed = failure.because("The action failed.", .{}),
+        };
+    }
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds a program shaped like the tool's own, for the tests below.
 //
 fn buildTestProgram(allocator: std.mem.Allocator, recorder: *Recorder) !*commander.Command {
-    const root = commander.Command.init(allocator, "tool");
-    _ = root.description("Reports which files have changed.")
+    const root = (try commander.Command.init(allocator, "tool"))
+        .description("Reports which files have changed.")
         .helpOption("--help", "Print this text.")
         .version("dev", "-v, --version", "Print the version.")
         .enablePositionalOptions();
 
-    const summary = commander.Command.init(allocator, "summary");
-    _ = summary.description("Show the changed files grouped under the targets they fall under.")
-        .option("--config <path>", "The config file to read.", null)
-        .option("--output <format>", "How to render the result: text, json or yaml.", "text")
+    const summary = (try commander.Command.init(allocator, "summary"))
+        .description("Show the changed files grouped under the targets they fall under.")
         .action(recorder, recordAction);
-    root.addCommand(summary);
+    try summary.option("--config <path>", "The config file to read.", null);
+    try summary.option("--output <format>", "How to render the result: text, json or yaml.", "text");
+    try root.addCommand(summary);
 
-    const baseline = commander.Command.init(allocator, "baseline");
-    _ = baseline.description("Manage the recorded baseline.");
-    _ = baseline.command("capture")
-        .alias("update")
-        .alias("set")
+    const baseline = (try commander.Command.init(allocator, "baseline"))
+        .description("Manage the recorded baseline.");
+    const capture = (try baseline.command("capture"))
         .description("Record what the named targets watch as their baseline.")
         .argument("[target names...]", "The targets to capture.")
-        .option("--config <path>", "The config file to read.", null)
         .action(recorder, recordAction);
-    root.addCommand(baseline);
+    try capture.alias("update");
+    try capture.alias("set");
+    try capture.option("--config <path>", "The config file to read.", null);
+    try root.addCommand(baseline);
 
-    const targets = commander.Command.init(allocator, "targets");
-    _ = targets.description("Print the affected target names.")
-        .option("--output <format>", "How to render the result.", "text")
-        .action(recorder, recordAction);
-    _ = targets.enablePositionalOptions();
-    _ = targets.command("list")
+    const targets = (try commander.Command.init(allocator, "targets"))
+        .description("Print the affected target names.")
+        .action(recorder, recordAction)
+        .enablePositionalOptions();
+    try targets.option("--output <format>", "How to render the result.", "text");
+    const list = (try targets.command("list"))
         .description("Print every target that can run on this platform.")
-        .option("--output <format>", "How to render the result.", "text")
         .action(recorder, recordAction);
-    root.addCommand(targets);
+    try list.option("--output <format>", "How to render the result.", "text");
+    try root.addCommand(targets);
 
     return root;
 }
@@ -75,30 +82,65 @@ fn buildTestProgram(allocator: std.mem.Allocator, recorder: *Recorder) !*command
 //
 // Runs a command line against that program and hands back what happened.
 //
-fn runLine(allocator: std.mem.Allocator, recorder: *Recorder, argv: []const []const u8, captured: *std.Io.Writer.Allocating) !commander.Program {
+fn runLine(allocator: std.mem.Allocator, recorder: *Recorder, argv: []const []const u8, captured: *std.Io.Writer.Allocating) !commander.Outcome {
     const root = try buildTestProgram(allocator, recorder);
-    var runner = commander.Program{ .out = &captured.writer };
-    commander.parse(&runner, root, argv) catch |err| switch (err) {
-        error.Displayed, error.Refused => {},
-        else => return err,
-    };
-    return runner;
+    return commander.parse(&captured.writer, root, argv);
 }
 
 test "Option.name strips the dashes and the placeholder" {
-    try testing.expectEqualStrings("config", (commander.Option{ .flags = "--config <path>", .description = "", .default_value = null }).name());
-    try testing.expectEqualStrings("output", (commander.Option{ .flags = "--output <format>", .description = "", .default_value = null }).name());
-    try testing.expectEqualStrings("force", (commander.Option{ .flags = "--force", .description = "", .default_value = null }).name());
-    try testing.expectEqualStrings("global", (commander.Option{ .flags = "-g, --global", .description = "", .default_value = null }).name());
-    try testing.expectEqualStrings("no-color", (commander.Option{ .flags = "--no-color", .description = "", .default_value = null }).name());
+    try testing.expectEqualStrings("config", (commander.Option{
+        .flags = "--config <path>",
+        .description = "",
+        .default_value = null,
+    }).name());
+    try testing.expectEqualStrings("output", (commander.Option{
+        .flags = "--output <format>",
+        .description = "",
+        .default_value = null,
+    }).name());
+    try testing.expectEqualStrings("force", (commander.Option{
+        .flags = "--force",
+        .description = "",
+        .default_value = null,
+    }).name());
+    try testing.expectEqualStrings("global", (commander.Option{
+        .flags = "-g, --global",
+        .description = "",
+        .default_value = null,
+    }).name());
+    try testing.expectEqualStrings("no-color", (commander.Option{
+        .flags = "--no-color",
+        .description = "",
+        .default_value = null,
+    }).name());
 }
 
 test "Option.takesValue is true only when the flags name a placeholder" {
-    try testing.expect((commander.Option{ .flags = "--ns <namespace>", .description = "", .default_value = null }).takesValue());
-    try testing.expect((commander.Option{ .flags = "--from <spec>", .description = "", .default_value = null }).takesValue());
-    try testing.expect(!(commander.Option{ .flags = "-g, --global", .description = "", .default_value = null }).takesValue());
-    try testing.expect(!(commander.Option{ .flags = "--open", .description = "", .default_value = null }).takesValue());
-    try testing.expect(!(commander.Option{ .flags = "--no-color", .description = "", .default_value = null }).takesValue());
+    try testing.expect((commander.Option{
+        .flags = "--ns <namespace>",
+        .description = "",
+        .default_value = null,
+    }).takesValue());
+    try testing.expect((commander.Option{
+        .flags = "--from <spec>",
+        .description = "",
+        .default_value = null,
+    }).takesValue());
+    try testing.expect(!(commander.Option{
+        .flags = "-g, --global",
+        .description = "",
+        .default_value = null,
+    }).takesValue());
+    try testing.expect(!(commander.Option{
+        .flags = "--open",
+        .description = "",
+        .default_value = null,
+    }).takesValue());
+    try testing.expect(!(commander.Option{
+        .flags = "--no-color",
+        .description = "",
+        .default_value = null,
+    }).takesValue());
 }
 
 test "isOption tells an option from a value" {
@@ -126,8 +168,9 @@ test "matches accepts a command's name and every alias" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const command = commander.Command.init(arena.allocator(), "capture");
-    _ = command.alias("update").alias("set");
+    const command = try commander.Command.init(arena.allocator(), "capture");
+    try command.alias("update");
+    try command.alias("set");
 
     try testing.expect(command.matches("capture"));
     try testing.expect(command.matches("update"));
@@ -139,9 +182,9 @@ test "findOption finds an option by any of its spellings" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const command = commander.Command.init(arena.allocator(), "summary");
-    _ = command.option("--config <path>", "The config file.", null);
-    _ = command.option("-g, --global", "Use the global config.", null);
+    const command = try commander.Command.init(arena.allocator(), "summary");
+    try command.option("--config <path>", "The config file.", null);
+    try command.option("-g, --global", "Use the global config.", null);
 
     try testing.expect(command.findOption("--config") != null);
     try testing.expect(command.findOption("-g") != null);
@@ -153,8 +196,8 @@ test "command adds a subcommand and returns the child to chain onto" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const parent = commander.Command.init(arena.allocator(), "baseline");
-    const child = parent.command("capture");
+    const parent = try commander.Command.init(arena.allocator(), "baseline");
+    const child = try parent.command("capture");
 
     try testing.expectEqual(@as(usize, 1), parent.subcommands.items.len);
     try testing.expectEqualStrings("capture", child.command_name);
@@ -168,11 +211,11 @@ test "an action runs and reads the options it was given" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{ "summary", "--config", "custom.yaml" }, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{ "summary", "--config", "custom.yaml" }, &captured);
 
     try testing.expect(recorder.ran);
     try testing.expectEqualStrings("custom.yaml", recorder.config.?);
-    try testing.expectEqual(@as(u8, 0), runner.exit_code);
+    try testing.expectEqual(@as(u8, 0), outcome.ran);
 }
 
 test "an option with a default arrives even when the command line is silent" {
@@ -266,9 +309,9 @@ test "an unknown option is refused in commander's words" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{"--nosuchoption"}, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{"--nosuchoption"}, &captured);
 
-    try testing.expectEqualStrings("Unknown option '--nosuchoption'.", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--nosuchoption'.", outcome.refused.message());
     try testing.expect(!recorder.ran);
 }
 
@@ -279,9 +322,9 @@ test "an option with no value is refused, quoting the flags" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{ "summary", "--config" }, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{ "summary", "--config" }, &captured);
 
-    try testing.expectEqualStrings("Option '--config <path>' is missing its argument.", runner.message.?);
+    try testing.expectEqualStrings("Option '--config <path>' is missing its argument.", outcome.refused.message());
 }
 
 test "an unknown command is refused and named" {
@@ -291,9 +334,9 @@ test "an unknown command is refused and named" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{"badcommand"}, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{"badcommand"}, &captured);
 
-    try testing.expectEqualStrings("Unknown command 'badcommand'.", runner.message.?);
+    try testing.expectEqualStrings("Unknown command 'badcommand'.", outcome.refused.message());
 }
 
 test "an argument a command does not take is refused" {
@@ -303,9 +346,9 @@ test "an argument a command does not take is refused" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{ "summary", "extra" }, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{ "summary", "extra" }, &captured);
 
-    try testing.expect(std.mem.startsWith(u8, runner.message.?, "Too many arguments"));
+    try testing.expect(std.mem.startsWith(u8, outcome.refused.message(), "Too many arguments"));
 }
 
 test "an option a subcommand does not declare is refused rather than ignored" {
@@ -315,9 +358,9 @@ test "an option a subcommand does not declare is refused rather than ignored" {
 
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{ "baseline", "capture", "--output", "json" }, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{ "baseline", "capture", "--output", "json" }, &captured);
 
-    try testing.expectEqualStrings("Unknown option '--output'.", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--output'.", outcome.refused.message());
 }
 
 test "--help prints the help and does not run anything" {
@@ -356,9 +399,9 @@ test "the program's help option can be respelled, and the default one then stops
     //
     var recorder = Recorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{"-h"}, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{"-h"}, &captured);
 
-    try testing.expectEqualStrings("Unknown option '-h'.", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '-h'.", outcome.refused.message());
 }
 
 test "--version and -v print the version" {
@@ -394,12 +437,14 @@ test "an action that fails makes the parse a refusal" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var recorder = Recorder{ .fail = true };
+    var recorder = Recorder{
+        .fail = true,
+    };
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runLine(allocator, &recorder, &.{"summary"}, &captured);
+    const outcome = try runLine(allocator, &recorder, &.{"summary"}, &captured);
 
     try testing.expect(recorder.ran);
-    try testing.expectEqual(@as(u8, 1), runner.exit_code);
+    try testing.expectEqualStrings("The action failed.", outcome.refused.message());
 }
 
 test "renderHelp lays the program out in commander's shape" {
@@ -425,13 +470,13 @@ test "renderHelp names a subcommand's aliases and what it accepts" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const baseline = commander.Command.init(allocator, "baseline");
-    _ = baseline.command("capture")
-        .alias("update")
-        .alias("set")
+    const baseline = try commander.Command.init(allocator, "baseline");
+    const capture = (try baseline.command("capture"))
         .description("Record the baseline.")
-        .argument("[target names...]", "The targets.")
-        .option("--config <path>", "The config file.", null);
+        .argument("[target names...]", "The targets.");
+    try capture.alias("update");
+    try capture.alias("set");
+    try capture.option("--config <path>", "The config file.", null);
 
     const help = try commander.renderHelp(allocator, baseline);
     try testing.expect(std.mem.indexOf(u8, help, "capture|update|set [options] [target names...]") != null);
@@ -446,8 +491,8 @@ test "renderHelp shows an option's default the way commander does" {
     // A short description, so the default is not pushed onto the next line by the wrapping. That
     // the long form wraps is checked separately; this is about the default being shown at all.
     //
-    const command = commander.Command.init(allocator, "summary");
-    _ = command.option("--output <format>", "How to render.", "text");
+    const command = try commander.Command.init(allocator, "summary");
+    try command.option("--output <format>", "How to render.", "text");
 
     const help = try commander.renderHelp(allocator, command);
     try testing.expect(std.mem.indexOf(u8, help, "How to render. (default: \"text\")") != null);
@@ -458,7 +503,7 @@ test "renderHelp puts the extra text after everything else" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const command = commander.Command.init(allocator, "capture");
+    const command = try commander.Command.init(allocator, "capture");
     _ = command.description("Record the baseline.").addHelpText("after", "\nCapture one target only after it has passed.");
 
     const help = try commander.renderHelp(allocator, command);
@@ -470,7 +515,7 @@ test "renderHelp wraps a long description rather than running past the width" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const command = commander.Command.init(allocator, "targets");
+    const command = try commander.Command.init(allocator, "targets");
     _ = command.description("Print the names of the targets affected by the current changes, one per line. Targets that cannot run on this platform are never named.");
 
     const help = try commander.renderHelp(allocator, command);
@@ -485,11 +530,11 @@ test "a usage line only claims what the command actually takes" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const bare = commander.Command.init(allocator, "bare");
+    const bare = try commander.Command.init(allocator, "bare");
     try testing.expect(std.mem.startsWith(u8, try commander.renderHelp(allocator, bare), "Usage: bare\n"));
 
-    const with_options = commander.Command.init(allocator, "opts");
-    _ = with_options.option("--config <path>", "The config file.", null);
+    const with_options = try commander.Command.init(allocator, "opts");
+    try with_options.option("--config <path>", "The config file.", null);
     try testing.expect(std.mem.startsWith(u8, try commander.renderHelp(allocator, with_options), "Usage: opts [options]\n"));
 }
 
@@ -510,7 +555,7 @@ const SklRecorder = struct {
 //
 // A test action for the skl-shaped program.
 //
-fn recordSklAction(invocation: *commander.Invocation) anyerror!void {
+fn recordSklAction(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const recorder: *SklRecorder = @constCast(@ptrCast(@alignCast(invocation.context)));
     recorder.ran = true;
     recorder.args = invocation.args;
@@ -520,39 +565,41 @@ fn recordSklAction(invocation: *commander.Invocation) anyerror!void {
     recorder.open = invocation.option("open");
     recorder.no_color = invocation.option("no-color");
     recorder.non_interactive = invocation.option("non-interactive");
-    invocation.exit_code = 0;
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds a program shaped like skl: root booleans, add --ns, init/add --from.
 //
 fn buildSklProgram(allocator: std.mem.Allocator, recorder: *SklRecorder) !*commander.Command {
-    const root = commander.Command.init(allocator, "skl");
-    _ = root.description("Install AI agent skill packages from git.")
-        .version("0.0.1", "-V, --version", "Output the version number.")
-        .option("-g, --global", "Use the global config.", null)
-        .option("--no-color", "Disable color and icons.", null)
-        .option("-n, --non-interactive", "Do not prompt.", null);
+    const root = (try commander.Command.init(allocator, "skl"))
+        .description("Install AI agent skill packages from git.")
+        .version("0.0.1", "-V, --version", "Output the version number.");
+    try root.option("-g, --global", "Use the global config.", null);
+    try root.option("--no-color", "Disable color and icons.", null);
+    try root.option("-n, --non-interactive", "Do not prompt.", null);
 
-    const add = commander.Command.init(allocator, "add");
-    _ = add.description("Add a package.")
+    const add = (try commander.Command.init(allocator, "add"))
+        .description("Add a package.")
         .argument("[repo]", "The package to add.")
-        .option("--ns <namespace>", "The namespace to install under.", null)
-        .option("--from <spec>", "A YAML file inside a git repo.", null)
         .action(recorder, recordSklAction);
-    root.addCommand(add);
+    try add.option("--ns <namespace>", "The namespace to install under.", null);
+    try add.option("--from <spec>", "A YAML file inside a git repo.", null);
+    try root.addCommand(add);
 
-    const init_cmd = commander.Command.init(allocator, "init");
-    _ = init_cmd.description("Create a config file.")
-        .option("--from <spec>", "A YAML file inside a git repo.", null)
+    const init_cmd = (try commander.Command.init(allocator, "init"))
+        .description("Create a config file.")
         .action(recorder, recordSklAction);
-    root.addCommand(init_cmd);
+    try init_cmd.option("--from <spec>", "A YAML file inside a git repo.", null);
+    try root.addCommand(init_cmd);
 
-    const docs = commander.Command.init(allocator, "docs");
-    _ = docs.description("Show package documentation.")
+    const docs = (try commander.Command.init(allocator, "docs"))
+        .description("Show package documentation.")
         .argument("[package]", "The package to open.")
         .action(recorder, recordSklAction);
-    root.addCommand(docs);
+    try root.addCommand(docs);
 
     return root;
 }
@@ -560,14 +607,9 @@ fn buildSklProgram(allocator: std.mem.Allocator, recorder: *SklRecorder) !*comma
 //
 // Runs a command line against the skl-shaped program.
 //
-fn runSklLine(allocator: std.mem.Allocator, recorder: *SklRecorder, argv: []const []const u8, captured: *std.Io.Writer.Allocating) !commander.Program {
+fn runSklLine(allocator: std.mem.Allocator, recorder: *SklRecorder, argv: []const []const u8, captured: *std.Io.Writer.Allocating) !commander.Outcome {
     const root = try buildSklProgram(allocator, recorder);
-    var runner = commander.Program{ .out = &captured.writer };
-    commander.parse(&runner, root, argv) catch |err| switch (err) {
-        error.Displayed, error.Refused => {},
-        else => return err,
-    };
-    return runner;
+    return commander.parse(&captured.writer, root, argv);
 }
 
 test "a boolean flag stores true when present and is null when absent" {
@@ -629,9 +671,9 @@ test "an unknown option on the skl-shaped program is still refused" {
 
     var recorder = SklRecorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runSklLine(allocator, &recorder, &.{ "add", "--nosuch" }, &captured);
+    const outcome = try runSklLine(allocator, &recorder, &.{ "add", "--nosuch" }, &captured);
 
-    try testing.expectEqualStrings("Unknown option '--nosuch'.", runner.message.?);
+    try testing.expectEqualStrings("Unknown option '--nosuch'.", outcome.refused.message());
     try testing.expect(!recorder.ran);
 }
 
@@ -642,14 +684,14 @@ test "--open is unknown on docs and add" {
 
     var docs_recorder = SklRecorder{};
     var docs_captured = std.Io.Writer.Allocating.init(allocator);
-    const docs_runner = try runSklLine(allocator, &docs_recorder, &.{ "docs", "--open", "acme/skills" }, &docs_captured);
-    try testing.expectEqualStrings("Unknown option '--open'.", docs_runner.message.?);
+    const docs_outcome = try runSklLine(allocator, &docs_recorder, &.{ "docs", "--open", "acme/skills" }, &docs_captured);
+    try testing.expectEqualStrings("Unknown option '--open'.", docs_outcome.refused.message());
     try testing.expect(!docs_recorder.ran);
 
     var add_recorder = SklRecorder{};
     var add_captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runSklLine(allocator, &add_recorder, &.{ "add", "--open" }, &add_captured);
-    try testing.expectEqualStrings("Unknown option '--open'.", runner.message.?);
+    const outcome = try runSklLine(allocator, &add_recorder, &.{ "add", "--open" }, &add_captured);
+    try testing.expectEqualStrings("Unknown option '--open'.", outcome.refused.message());
     try testing.expect(!add_recorder.ran);
 }
 
@@ -660,9 +702,9 @@ test "--ns still requires a value" {
 
     var recorder = SklRecorder{};
     var captured = std.Io.Writer.Allocating.init(allocator);
-    const runner = try runSklLine(allocator, &recorder, &.{ "add", "--ns" }, &captured);
+    const outcome = try runSklLine(allocator, &recorder, &.{ "add", "--ns" }, &captured);
 
-    try testing.expectEqualStrings("Option '--ns <namespace>' is missing its argument.", runner.message.?);
+    try testing.expectEqualStrings("Option '--ns <namespace>' is missing its argument.", outcome.refused.message());
     try testing.expect(!recorder.ran);
 }
 
@@ -674,10 +716,10 @@ test "--help, -h, and the help command all display help" {
     for ([_][]const []const u8{ &.{"--help"}, &.{"-h"}, &.{"help"} }) |argv| {
         var recorder = SklRecorder{};
         var captured = std.Io.Writer.Allocating.init(allocator);
-        const runner = try runSklLine(allocator, &recorder, argv, &captured);
+        const outcome = try runSklLine(allocator, &recorder, argv, &captured);
 
         try testing.expect(std.mem.startsWith(u8, captured.written(), "Usage: skl"));
-        try testing.expect(runner.message == null);
+        try testing.expect(outcome == .displayed);
         try testing.expect(!recorder.ran);
     }
 
@@ -715,4 +757,55 @@ test "-n and --no-color are booleans on the root and reach add" {
     try testing.expect(recorder.ran);
     try testing.expectEqualStrings("true", recorder.non_interactive.?);
     try testing.expectEqualStrings("true", recorder.no_color.?);
+}
+
+//
+// A program with an option, an alias and a subcommand, built from `allocator`: something to fail
+// each allocation of in turn.
+//
+fn buildSmallProgram(allocator: std.mem.Allocator) std.mem.Allocator.Error!*commander.Command {
+    const program = (try commander.program(allocator)).name("skl");
+    try program.option("-g, --global", "Use the global config.", null);
+    const install = try commander.Command.init(allocator, "install");
+    try install.alias("i");
+    try install.option("--quiet", "", null);
+    try program.addCommand(install);
+    return program;
+}
+
+test "building a command line returns error.OutOfMemory at every allocation that fails, and never panics" {
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var failing = testing.FailingAllocator.init(arena.allocator(), .{
+            .fail_index = fail_index,
+        });
+
+        const built = buildSmallProgram(failing.allocator());
+
+        if (!failing.has_induced_failure) {
+            _ = try built;
+            break;
+        }
+        try testing.expectError(error.OutOfMemory, built);
+    }
+    try testing.expect(fail_index > 0);
+}
+
+test "writeWrapped puts every word on a line of its own when the indent leaves no room" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(testing.allocator);
+
+    try commander.writeWrapped(&out, testing.allocator, "one two", commander.HELP_TOTAL_WIDTH + 1);
+
+    try testing.expect(std.mem.startsWith(u8, out.items, "one\n"));
+    try testing.expect(std.mem.endsWith(u8, out.items, "two\n"));
+}
+
+test "writeWrapped reports running out of memory, not a crash, for an indent too large to hold" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(testing.allocator);
+
+    try testing.expectError(error.OutOfMemory, commander.writeWrapped(&out, testing.allocator, "one two", std.math.maxInt(usize)));
 }

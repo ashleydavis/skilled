@@ -1,15 +1,15 @@
 //
-// The values every CLI command takes from the process, so tests can inject the rest.
+// The values every CLI command takes from the process.
 //
 // Commands never read argv, cwd, HOME, or the environment on their own. main fills this in from
-// the real process; unit tests fill it in from a TemporaryDir and a fake git runner.
+// the real process.
 //
 
 const std = @import("std");
 const skilled = @import("skilled");
 
 //
-// Clone, fetch, and HEAD go through this runner so a test never hits the network.
+// Clone, fetch, and HEAD go through this runner.
 //
 const git = skilled.git;
 
@@ -19,14 +19,10 @@ const git = skilled.git;
 const term = skilled.term;
 
 //
-// How a refused command is described to the user.
+// One spawn of a browser: argv plus the environment that spawn sees, returning the failure that
+// says why the URL could not be opened.
 //
-const Failure = skilled.failure.Failure;
-
-//
-// One spawn of a browser: argv plus the environment that spawn sees.
-//
-// The process runner ignores ctx. Tests pass their fake as ctx so they can record argv.
+// The process runner ignores ctx.
 //
 pub const BrowserRunFn = *const fn (
     ctx: *anyopaque,
@@ -34,11 +30,10 @@ pub const BrowserRunFn = *const fn (
     allocator: std.mem.Allocator,
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
-    fail: *Failure,
-) skilled.failure.Error!void;
+) std.mem.Allocator.Error!skilled.failure.Result(void);
 
 //
-// How a URL is opened. The CLI uses `.process`; docs tests use `.custom` so nothing launches.
+// How a URL is opened. The CLI uses `.process`.
 //
 pub const BrowserRunner = union(enum) {
     //
@@ -49,15 +44,15 @@ pub const BrowserRunner = union(enum) {
     //
     // A callback that records argv and returns a scripted success or failure.
     //
-    custom: CustomBrowser,
+    function: BrowserFunction,
 };
 
 //
-// The fake half of BrowserRunner: an opaque pointer and the function that uses it.
+// The function half of BrowserRunner: an opaque pointer and the function that uses it.
 //
-pub const CustomBrowser = struct {
+pub const BrowserFunction = struct {
     //
-    // The fake's state, typically the recorder in src/lib/test/harness.zig.
+    // The state the function is handed on every call.
     //
     ctx: *anyopaque,
 
@@ -71,12 +66,12 @@ pub const CustomBrowser = struct {
 // Everything a command needs from outside itself.
 //
 // `global` is not here: it is a flag on the invocation, so the same context can run a project
-// command and a `-g` command without being rebuilt. Git and the browser are runners so tests
-// inject fakes; the CLI passes `.process`.
+// command and a `-g` command without being rebuilt. Git and the browser are runners; the CLI
+// passes `.process`.
 //
 pub const Context = struct {
     //
-    // Arena for the whole run in the CLI; a test arena in unit tests.
+    // Arena for the whole run in the CLI.
     //
     allocator: std.mem.Allocator,
 
@@ -86,7 +81,7 @@ pub const Context = struct {
     io: std.Io,
 
     //
-    // The environment git and the browser inherit. Tests pass a private map, never the process.
+    // The environment git and the browser inherit.
     //
     environ: *const std.process.Environ.Map,
 
@@ -126,7 +121,7 @@ pub const Context = struct {
     browser: BrowserRunner,
 
     //
-    // Stdin, for `--ns` and docs prompts. A real file in the CLI; a fixed buffer in tests.
+    // Stdin, for `--ns` and docs prompts. A real file in the CLI.
     //
     stdin: *std.Io.Reader,
 
@@ -136,12 +131,47 @@ pub const Context = struct {
     stdout: *std.Io.Writer,
 
     //
-    // Where progress, prompts, and failure text go. Tests capture this separately from stdout.
+    // Where progress, prompts, and failure text go.
     //
     stderr: *std.Io.Writer,
 
     //
-    // Filled in when a command refuses. The CLI prints it; tests read `fail.text()`.
+    // A context from the values every caller has to supply.
     //
-    fail: *Failure,
+    // The rest start as a run nobody is watching: plain output, no prompts, stderr not a TTY, and
+    // git and the browser started as real processes. A caller that differs sets those fields after.
+    //
+    pub fn init(
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        environ: *const std.process.Environ.Map,
+        cwd: []const u8,
+        home: []const u8,
+        stdin: *std.Io.Reader,
+        stdout: *std.Io.Writer,
+        stderr: *std.Io.Writer,
+    ) Context {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .environ = environ,
+            .cwd = cwd,
+            .home = home,
+            .style = .{
+                .color = false,
+                .icons = false,
+            },
+            .non_interactive = true,
+            .stderr_is_tty = false,
+            .git = git.processRunner(),
+            .browser = .process,
+            .stdin = stdin,
+            .stdout = stdout,
+            .stderr = stderr,
+        };
+    }
 };
+
+test {
+    _ = @import("context.test.zig");
+}

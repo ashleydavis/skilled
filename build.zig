@@ -64,6 +64,30 @@ pub fn build(b: *std.Build) void {
     // CLI layer above it. Both are wired to the one `zig build test` step, so a single command
     // runs everything.
     //
+    //
+    // Each test's own `Io` and throwaway directory, which both test binaries use. A module of its
+    // own because a file imported by path from both would belong to two modules, which Zig refuses.
+    //
+    const test_disk_mod = b.createModule(.{
+        .root_source_file = b.path("src/lib/test/test_disk.test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lib_mod.addImport("test_disk", test_disk_mod);
+    exe_mod.addImport("test_disk", test_disk_mod);
+
+    //
+    // Checks on a returned value or refusal, which both test binaries make. A module of its own for
+    // the same reason as `test_disk`.
+    //
+    const expect_result_mod = b.createModule(.{
+        .root_source_file = b.path("src/lib/test/expect_result.test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lib_mod.addImport("expect_result", expect_result_mod);
+    exe_mod.addImport("expect_result", expect_result_mod);
+
     const lib_tests = b.addTest(.{ .root_module = lib_mod });
     const run_lib_tests = b.addRunArtifact(lib_tests);
 
@@ -73,6 +97,15 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run every unit test.");
     test_step.dependOn(&run_lib_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    //
+    // `zig build flt` fault tests every function in the project. It is called after the library
+    // module is registered because the program Faultline builds is given every module registered here.
+    //
+    //
+    // Nothing is excluded: all test code is in `.test.zig` files, which Faultline always skips.
+    //
+    @import("faultline").addFaultTest(b, .{});
 
     //
     // The release build: an optimised binary at the path the smoke tests look for. ReleaseSafe

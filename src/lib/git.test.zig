@@ -5,8 +5,11 @@
 const std = @import("std");
 const failure = @import("failure.zig");
 const files = @import("files.zig");
+const TemporaryDir = @import("test_disk").TemporaryDir;
+const TestIo = @import("test_disk").TestIo;
 const git = @import("git.zig");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 //
 // One scripted reply the fake runner returns, in enqueue order.
@@ -98,7 +101,12 @@ const Scripted = struct {
     // The GitRunner clone, showFile, fetchUpdate, and headSha take.
     //
     fn runner(self: *Scripted) git.GitRunner {
-        return git.customRunner(@ptrCast(self), run);
+        return .{
+            .function = .{
+                .ctx = @ptrCast(self),
+                .runFn = run,
+            },
+        };
     }
 };
 
@@ -112,8 +120,7 @@ fn run(
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
     cwd: ?[]const u8,
-    fail: *failure.Failure,
-) git.RunError!git.Result {
+) git.RunError!failure.Result(git.Result) {
     _ = io;
     const self: *Scripted = @ptrCast(@alignCast(ctx));
     try self.calls.append(self.allocator, .{
@@ -128,13 +135,17 @@ fn run(
         return error.FileNotFound;
     }
     if (self.calls.items.len > self.replies.items.len) {
-        return fail.set("scripted git has no reply left for {s}", .{argv[1]});
+        return .{
+            .failed = failure.because("scripted git has no reply left for {s}", .{argv[1]}),
+        };
     }
     const reply = self.replies.items[self.calls.items.len - 1];
     return .{
-        .stdout = try allocator.dupe(u8, reply.stdout),
-        .stderr = try allocator.dupe(u8, reply.stderr),
-        .exit_code = reply.exit_code,
+        .ok = .{
+            .stdout = try allocator.dupe(u8, reply.stdout),
+            .stderr = try allocator.dupe(u8, reply.stderr),
+            .exit_code = reply.exit_code,
+        },
     };
 }
 
@@ -175,7 +186,7 @@ fn emptyEnviron(allocator: std.mem.Allocator) std.process.Environ.Map {
 }
 
 test "clone argv uses -- and the store host/owner/repo dest" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -183,16 +194,17 @@ test "clone argv uses -- and the store host/owner/repo dest" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
     try scripted.enqueue(.{});
 
     const dest = try files.joinPath(allocator, &.{ temporary.path, "store", "github.com", "acme", "skills" });
-    var fail = failure.Failure.init(allocator);
-    try git.clone(
+    try expect_result.ok(try git.clone(
         io,
         allocator,
         &environ,
@@ -200,8 +212,7 @@ test "clone argv uses -- and the store host/owner/repo dest" {
         "git@github.com:acme/skills.git",
         dest,
         null,
-        &fail,
-    );
+    ));
 
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
     try expectArgv(scripted.calls.items[0], &.{
@@ -219,7 +230,7 @@ test "clone argv uses -- and the store host/owner/repo dest" {
 }
 
 test "clone argv includes --branch when a branch is given" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -227,16 +238,17 @@ test "clone argv includes --branch when a branch is given" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
     try scripted.enqueue(.{});
 
     const dest = try files.joinPath(allocator, &.{ temporary.path, "store", "github.com", "acme", "skills" });
-    var fail = failure.Failure.init(allocator);
-    try git.clone(
+    try expect_result.ok(try git.clone(
         io,
         allocator,
         &environ,
@@ -244,8 +256,7 @@ test "clone argv includes --branch when a branch is given" {
         "git@github.com:acme/skills.git",
         dest,
         "feature",
-        &fail,
-    );
+    ));
 
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
     try expectArgv(scripted.calls.items[0], &.{
@@ -260,7 +271,7 @@ test "clone argv includes --branch when a branch is given" {
 }
 
 test "showFile argv is git show ref:path" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -269,11 +280,14 @@ test "showFile argv is git show ref:path" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "packages: []\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "packages: []\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    const text = try git.showFile(
+    const text = try expect_result.ok(try git.showFile(
         io,
         allocator,
         &environ,
@@ -281,8 +295,7 @@ test "showFile argv is git show ref:path" {
         "/tmp/acme/skl-config",
         "main",
         "teams/platform.yaml",
-        &fail,
-    );
+    ));
 
     try testing.expectEqualStrings("packages: []\n", text);
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
@@ -291,7 +304,7 @@ test "showFile argv is git show ref:path" {
 }
 
 test "fetchUpdate refuses a detached HEAD" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -300,24 +313,26 @@ test "fetchUpdate refuses a detached HEAD" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "HEAD\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "HEAD\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, git.fetchUpdate(
+    const why = try expect_result.failed(try git.fetchUpdate(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "detached") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "detached") != null);
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
 }
 
 test "fetchUpdate refuses a dirty working tree" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -326,25 +341,29 @@ test "fetchUpdate refuses a dirty working tree" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "main\n" });
-    try scripted.enqueue(.{ .stdout = " M README.md\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "main\n",
+    });
+    try scripted.enqueue(.{
+        .stdout = " M README.md\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, git.fetchUpdate(
+    const why = try expect_result.failed(try git.fetchUpdate(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "dirty") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "dirty") != null);
     try testing.expectEqual(@as(usize, 2), scripted.calls.items.len);
 }
 
 test "fetchUpdate refuses a missing upstream" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -353,26 +372,31 @@ test "fetchUpdate refuses a missing upstream" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "main\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "main\n",
+    });
     try scripted.enqueue(.{});
-    try scripted.enqueue(.{ .exit_code = 128, .stderr = "no upstream\n" });
+    try scripted.enqueue(.{
+        .exit_code = 128,
+        .stderr = "no upstream\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, git.fetchUpdate(
+    const why = try expect_result.failed(try git.fetchUpdate(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "upstream") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "upstream") != null);
     try testing.expectEqual(@as(usize, 3), scripted.calls.items.len);
 }
 
 test "fetchUpdate runs git fetch then merge --ff-only @{upstream}" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -381,16 +405,21 @@ test "fetchUpdate runs git fetch then merge --ff-only @{upstream}" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "main\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "main\n",
+    });
     try scripted.enqueue(.{});
-    try scripted.enqueue(.{ .stdout = "origin/main\n" });
+    try scripted.enqueue(.{
+        .stdout = "origin/main\n",
+    });
     try scripted.enqueue(.{});
     try scripted.enqueue(.{});
 
     const dest = "/tmp/store/github.com/acme/skills";
-    var fail = failure.Failure.init(allocator);
-    try git.fetchUpdate(io, allocator, &environ, scripted.runner(), dest, &fail);
+    try expect_result.ok(try git.fetchUpdate(io, allocator, &environ, scripted.runner(), dest));
 
     try testing.expectEqual(@as(usize, 5), scripted.calls.items.len);
     try expectArgv(scripted.calls.items[0], &.{ "git", "rev-parse", "--abbrev-ref", "HEAD" });
@@ -404,7 +433,7 @@ test "fetchUpdate runs git fetch then merge --ff-only @{upstream}" {
 }
 
 test "headSha argv is git rev-parse HEAD" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -413,18 +442,20 @@ test "headSha argv is git rev-parse HEAD" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "abc123def\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "abc123def\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    const sha = try git.headSha(
+    const sha = try expect_result.ok(try git.headSha(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
-    );
+    ));
 
     try testing.expectEqualStrings("abc123def", sha);
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
@@ -432,7 +463,7 @@ test "headSha argv is git rev-parse HEAD" {
 }
 
 test "git not on PATH maps to a readable error" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -441,22 +472,23 @@ test "git not on PATH maps to a readable error" {
     const allocator = arena.allocator();
 
     var environ = emptyEnviron(allocator);
-    var scripted = Scripted{ .allocator = allocator, .missing = true };
+    var scripted = Scripted{
+        .allocator = allocator,
+        .missing = true,
+    };
 
-    var fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, git.headSha(
+    const why = try expect_result.failed(try git.headSha(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
     ));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "PATH") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "PATH") != null);
 }
 
 test "spawn drops GIT_DIR and GIT_WORK_TREE and keeps SSH and GIT_CONFIG" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -470,18 +502,20 @@ test "spawn drops GIT_DIR and GIT_WORK_TREE and keeps SSH and GIT_CONFIG" {
     try environ.put("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock");
     try environ.put("GIT_CONFIG_COUNT", "1");
 
-    var scripted = Scripted{ .allocator = allocator };
-    try scripted.enqueue(.{ .stdout = "abc123\n" });
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+    try scripted.enqueue(.{
+        .stdout = "abc123\n",
+    });
 
-    var fail = failure.Failure.init(allocator);
-    _ = try git.headSha(
+    _ = try expect_result.ok(try git.headSha(
         io,
         allocator,
         &environ,
         scripted.runner(),
         "/tmp/store/github.com/acme/skills",
-        &fail,
-    );
+    ));
 
     try testing.expectEqual(@as(usize, 1), scripted.calls.items.len);
     try testing.expect(scripted.calls.items[0].git_dir == null);
@@ -490,4 +524,25 @@ test "spawn drops GIT_DIR and GIT_WORK_TREE and keeps SSH and GIT_CONFIG" {
     try testing.expectEqualStrings("1", scripted.calls.items[0].git_config_count.?);
     try testing.expectEqualStrings("/wrong/repo/.git", environ.get("GIT_DIR").?);
     try testing.expectEqualStrings("/wrong/repo", environ.get("GIT_WORK_TREE").?);
+}
+
+test "invoke refuses an argv with no git command and runs nothing" {
+    var test_io = TestIo.init();
+    defer test_io.deinit();
+    const io = test_io.io();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var environ = emptyEnviron(allocator);
+    var scripted = Scripted{
+        .allocator = allocator,
+    };
+
+    for ([_][]const []const u8{ &.{}, &.{"git"} }) |argv| {
+        const why = try expect_result.failed(try git.invoke(scripted.runner(), io, allocator, &environ, argv, null));
+        try testing.expectEqualStrings("No git command to run.", why.message());
+    }
+    try testing.expectEqual(@as(usize, 0), scripted.calls.items.len);
 }

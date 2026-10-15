@@ -33,11 +33,6 @@ const git = @import("git.zig");
 const remote = @import("remote.zig");
 
 //
-// Alias so signatures read as Failure rather than failure.Failure.
-//
-const Failure = failure.Failure;
-
-//
 // A YAML file inside a git repo, after the spec has been split and names validated.
 //
 // `remote.clone_url` is what `git clone` receives (always SSH). `ref` is `HEAD` when the spec did
@@ -61,26 +56,30 @@ pub const Spec = struct {
 };
 
 //
-// Turns a `--from` spec into host/owner/repo/ref/path, or records why it is refused.
+// Turns a `--from` spec into host/owner/repo/ref/path, or the failure that says why it is refused.
 //
 // First match wins: GitHub HTTPS UI URL, then SSH with a second colon for the path, then
 // `owner/repo:path`. HTTPS is only a locator; the clone URL is still SSH. Names are validated
 // before any clone.
 //
-pub fn parse(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
+pub fn parse(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Spec) {
     if (spec.len == 0) {
-        return fail.set("--from spec is empty", .{});
+        return .{
+            .failed = failure.because("--from spec is empty", .{}),
+        };
     }
     if (startsWithIgnoreCase(spec, "http://")) {
-        return fail.set("HTTP --from specs are not supported; use an https://github.com/... URL", .{});
+        return .{
+            .failed = failure.because("HTTP --from specs are not supported; use an https://github.com/... URL", .{}),
+        };
     }
     if (startsWithIgnoreCase(spec, "https://")) {
-        return parseHttps(allocator, spec, fail);
+        return parseHttps(allocator, spec);
     }
     if (std.mem.startsWith(u8, spec, "git@")) {
-        return parseSsh(allocator, spec, fail);
+        return parseSsh(allocator, spec);
     }
-    return parseShorthand(allocator, spec, fail);
+    return parseShorthand(allocator, spec);
 }
 
 //
@@ -96,11 +95,20 @@ pub fn fetchConfig(
     environ: *const std.process.Environ.Map,
     runner: git.GitRunner,
     spec_text: []const u8,
-    fail: *Failure,
-) failure.Error!config.File {
-    const spec = try parse(allocator, spec_text, fail);
-    const text = try fetchText(io, allocator, environ, runner, spec, fail);
-    return config.parse(allocator, text, fail);
+) std.mem.Allocator.Error!failure.Result(config.File) {
+    const spec = switch (try parse(allocator, spec_text)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const text = switch (try fetchText(io, allocator, environ, runner, spec)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return config.parse(allocator, text);
 }
 
 //
@@ -115,8 +123,7 @@ pub fn mergePackages(
     allocator: std.mem.Allocator,
     existing: []const config.Package,
     incoming: []const config.Package,
-    fail: *Failure,
-) failure.Error![]config.Package {
+) std.mem.Allocator.Error!failure.Result([]config.Package) {
     var packages: std.ArrayList(config.Package) = .empty;
     try packages.appendSlice(allocator, existing);
     for (incoming) |pkg| {
@@ -124,108 +131,185 @@ pub fn mergePackages(
             if (samePackage(allocator, taken.repo, pkg.repo)) {
                 continue;
             }
-            return fail.set("namespace \"{s}\" is already used by {s}", .{ pkg.namespace, taken.repo });
+            return .{
+                .failed = failure.because("namespace \"{s}\" is already used by {s}", .{ pkg.namespace, taken.repo }),
+            };
         }
         try packages.append(allocator, pkg);
     }
-    return packages.toOwnedSlice(allocator);
+    return .{
+        .ok = try packages.toOwnedSlice(allocator),
+    };
 }
 
 //
 // `https://github.com/owner/repo/blob/<ref>/path` or `https://github.com/owner/repo/path`.
 //
 // Non-github.com hosts are refused in v1. Query strings and fragments are stripped so a copied
-// blob URL still parses. The clone is `git@github.com:owner/repo.git`.
+// blob URL still parses. The clone is `git@github.com:owner/repo.git`. A spec that does not start
+// with `https://` is refused.
 //
-fn parseHttps(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
+pub fn parseHttps(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Spec) {
+    if (!startsWithIgnoreCase(spec, "https://")) {
+        return .{
+            .failed = failure.because("invalid --from URL '{s}'; expected https://github.com/owner/repo/path", .{spec}),
+        };
+    }
     const after_scheme = spec["https://".len..];
     const without_fragment = stripAfter(after_scheme, '#');
     const loc = stripAfter(without_fragment, '?');
     const slash = std.mem.indexOfScalar(u8, loc, '/') orelse {
-        return fail.set("invalid --from URL '{s}'; expected https://github.com/owner/repo/path", .{spec});
+        return .{
+            .failed = failure.because("invalid --from URL '{s}'; expected https://github.com/owner/repo/path", .{spec}),
+        };
     };
     const host = loc[0..slash];
     if (!std.ascii.eqlIgnoreCase(host, "github.com")) {
-        return fail.set("HTTPS --from specs must use github.com; got '{s}'", .{host});
+        return .{
+            .failed = failure.because("HTTPS --from specs must use github.com; got '{s}'", .{host}),
+        };
     }
     const rest = loc[slash + 1 ..];
     var parts: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, rest, '/');
     while (it.next()) |part| {
         if (part.len == 0) {
-            return fail.set("invalid --from URL '{s}'; expected https://github.com/owner/repo/path", .{spec});
+            return .{
+                .failed = failure.because("invalid --from URL '{s}'; expected https://github.com/owner/repo/path", .{spec}),
+            };
         }
         try parts.append(allocator, part);
     }
     if (parts.items.len < 3) {
-        return fail.set("invalid --from URL '{s}'; path is required", .{spec});
+        return .{
+            .failed = failure.because("invalid --from URL '{s}'; path is required", .{spec}),
+        };
     }
 
     const owner = parts.items[0];
     const repo_part = parts.items[1];
     const is_blob = std.mem.eql(u8, parts.items[2], "blob");
     if (is_blob and parts.items.len < 5) {
-        return fail.set("invalid --from URL '{s}'; path is required", .{spec});
+        return .{
+            .failed = failure.because("invalid --from URL '{s}'; path is required", .{spec}),
+        };
     }
     const ref: []const u8 = if (is_blob) parts.items[3] else "HEAD";
     const path_parts: []const []const u8 = if (is_blob) parts.items[4..] else parts.items[2..];
 
-    const path = try joinGitPath(allocator, path_parts, fail);
+    const path = switch (try joinGitPath(allocator, path_parts)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     const shorthand = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ owner, repo_part });
-    const parsed = try remote.parse(allocator, shorthand, fail);
-    try remote.validateName(ref, "ref", fail);
+    const parsed = switch (try remote.parse(allocator, shorthand)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (remote.validateName(ref, "ref")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     return .{
-        .remote = parsed,
-        .ref = try allocator.dupe(u8, ref),
-        .path = path,
+        .ok = .{
+            .remote = parsed,
+            .ref = try allocator.dupe(u8, ref),
+            .path = path,
+        },
     };
 }
 
 //
 // `git@host:owner/repo.git:path`. The first colon is host vs owner/repo; a second colon starts the
-// file path. No second colon is an error because a path is required.
+// file path. No second colon is an error because a path is required, and so is a spec that does
+// not start with `git@`.
 //
-fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
+pub fn parseSsh(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Spec) {
+    if (!std.mem.startsWith(u8, spec, "git@")) {
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; expected git@host:owner/repo:path.", .{spec}),
+        };
+    }
     const rest = spec["git@".len..];
     const first = std.mem.indexOfScalar(u8, rest, ':') orelse {
-        return fail.set("Invalid --from spec '{s}'; expected git@host:owner/repo:path.", .{spec});
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; expected git@host:owner/repo:path.", .{spec}),
+        };
     };
     const after_host = rest[first + 1 ..];
     const second = std.mem.indexOfScalar(u8, after_host, ':') orelse {
-        return fail.set("Invalid --from spec '{s}'; a path is required after the repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; a path is required after the repo.", .{spec}),
+        };
     };
     const remote_spec = spec[0 .. "git@".len + first + 1 + second];
     const path = after_host[second + 1 ..];
     if (path.len == 0) {
-        return fail.set("Invalid --from spec '{s}'; a path is required after the repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; a path is required after the repo.", .{spec}),
+        };
     }
-    const parsed = try remote.parse(allocator, remote_spec, fail);
-    const path_owned = try copyGitPath(allocator, path, fail);
+    const parsed = switch (try remote.parse(allocator, remote_spec)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const path_owned = switch (try copyGitPath(allocator, path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     return .{
-        .remote = parsed,
-        .ref = try allocator.dupe(u8, "HEAD"),
-        .path = path_owned,
+        .ok = .{
+            .remote = parsed,
+            .ref = try allocator.dupe(u8, "HEAD"),
+            .path = path_owned,
+        },
     };
 }
 
 //
 // `owner/repo:path`. Split on the first colon. No colon, or an empty side, is an error.
 //
-fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8, fail: *Failure) failure.Error!Spec {
+fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Spec) {
     const colon = std.mem.indexOfScalar(u8, spec, ':') orelse {
-        return fail.set("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec});
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec}),
+        };
     };
     const left = spec[0..colon];
     const path = spec[colon + 1 ..];
     if (left.len == 0 or path.len == 0) {
-        return fail.set("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec});
+        return .{
+            .failed = failure.because("Invalid --from spec '{s}'; expected owner/repo:path.", .{spec}),
+        };
     }
-    const parsed = try remote.parse(allocator, left, fail);
-    const path_owned = try copyGitPath(allocator, path, fail);
+    const parsed = switch (try remote.parse(allocator, left)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const path_owned = switch (try copyGitPath(allocator, path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     return .{
-        .remote = parsed,
-        .ref = try allocator.dupe(u8, "HEAD"),
-        .path = path_owned,
+        .ok = .{
+            .remote = parsed,
+            .ref = try allocator.dupe(u8, "HEAD"),
+            .path = path_owned,
+        },
     };
 }
 
@@ -238,18 +322,22 @@ fn fetchText(
     environ: *const std.process.Environ.Map,
     runner: git.GitRunner,
     spec: Spec,
-    fail: *Failure,
-) failure.Error![]const u8 {
+) std.mem.Allocator.Error!failure.Result([]const u8) {
     const dest = try uniqueDest(io, allocator, tempParent(environ), spec.remote.repo);
     const temp_root = files.dirName(dest);
     defer std.Io.Dir.cwd().deleteTree(io, temp_root) catch {};
 
-    try git.clone(io, allocator, environ, runner, spec.remote.clone_url, dest, null, fail);
-    return git.showFile(io, allocator, environ, runner, dest, spec.ref, spec.path, fail);
+    switch (try git.clone(io, allocator, environ, runner, spec.remote.clone_url, dest, null)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return git.showFile(io, allocator, environ, runner, dest, spec.ref, spec.path);
 }
 
 //
-// TMPDIR, else TMP, else TEMP, else `/tmp`. Tests set TMPDIR to their TemporaryDir.
+// TMPDIR, else TMP, else TEMP, else `/tmp`.
 //
 fn tempParent(environ: *const std.process.Environ.Map) []const u8 {
     if (nonEmpty(environ.get("TMPDIR"))) |value| {
@@ -283,29 +371,40 @@ fn uniqueDest(
 //
 // Joins git-show path segments with `/` after validating each one.
 //
-fn joinGitPath(allocator: std.mem.Allocator, parts: []const []const u8, fail: *Failure) failure.Error![]const u8 {
+fn joinGitPath(allocator: std.mem.Allocator, parts: []const []const u8) std.mem.Allocator.Error!failure.Result([]const u8) {
     for (parts) |part| {
-        try remote.validateName(part, "path", fail);
+        switch (remote.validateName(part, "path")) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
-    return std.mem.join(allocator, "/", parts);
+    return .{
+        .ok = try std.mem.join(allocator, "/", parts),
+    };
 }
 
 //
 // Validates each `/`-separated segment of a path that already uses git's slashes.
 //
-fn copyGitPath(allocator: std.mem.Allocator, path: []const u8, fail: *Failure) failure.Error![]const u8 {
+fn copyGitPath(allocator: std.mem.Allocator, path: []const u8) std.mem.Allocator.Error!failure.Result([]const u8) {
     if (path.len == 0) {
-        return fail.set("Invalid --from spec: the path is empty.", .{});
+        return .{
+            .failed = failure.because("Invalid --from spec: the path is empty.", .{}),
+        };
     }
     var parts: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, path, '/');
     while (it.next()) |part| {
         if (part.len == 0) {
-            return fail.set("Invalid --from path '{s}'.", .{path});
+            return .{
+                .failed = failure.because("Invalid --from path '{s}'.", .{path}),
+            };
         }
         try parts.append(allocator, part);
     }
-    return joinGitPath(allocator, parts.items, fail);
+    return joinGitPath(allocator, parts.items);
 }
 
 //
@@ -315,10 +414,14 @@ fn samePackage(allocator: std.mem.Allocator, left: []const u8, right: []const u8
     if (std.mem.eql(u8, left, right)) {
         return true;
     }
-    var left_fail = Failure.init(allocator);
-    var right_fail = Failure.init(allocator);
-    const parsed_left = remote.parse(allocator, left, &left_fail) catch return false;
-    const parsed_right = remote.parse(allocator, right, &right_fail) catch return false;
+    const parsed_left = switch (remote.parse(allocator, left) catch return false) {
+        .ok => |got| got,
+        .failed => return false,
+    };
+    const parsed_right = switch (remote.parse(allocator, right) catch return false) {
+        .ok => |got| got,
+        .failed => return false,
+    };
     return std.mem.eql(u8, parsed_left.host, parsed_right.host) and
         std.mem.eql(u8, parsed_left.owner, parsed_right.owner) and
         std.mem.eql(u8, parsed_left.repo, parsed_right.repo);

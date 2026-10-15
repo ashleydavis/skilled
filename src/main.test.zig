@@ -4,33 +4,37 @@
 
 const std = @import("std");
 const commander = skilled.commander;
-const harness = @import("lib/test/harness.zig");
+const harness = @import("lib/test/harness.test.zig");
 const main = @import("main.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
-
-const Failure = skilled.failure.Failure;
 
 test "reportFailure prints the message and exits non-zero" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var fail = Failure.init(arena.allocator());
-    _ = fail.set("No skl.yaml here; run skl init.", .{}) catch {};
+    const why = skilled.failure.because("No skl.yaml here; run skl init.", .{});
 
     var captured = std.Io.Writer.Allocating.init(arena.allocator());
-    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer, .{ .color = false, .icons = false }));
+    try testing.expectEqual(@as(u8, 1), main.reportFailure(&why, &captured.writer, .{
+        .color = false,
+        .icons = false,
+    }));
     try testing.expectEqualStrings("No skl.yaml here; run skl init.\n", captured.written());
 }
 
-test "reportFailure says something even when nothing was recorded" {
+test "reportFailure paints the message red when the stream takes color" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var fail = Failure.init(arena.allocator());
+    const why = skilled.failure.because("No skl.yaml here; run skl init.", .{});
+
     var captured = std.Io.Writer.Allocating.init(arena.allocator());
-    try testing.expectEqual(@as(u8, 1), main.reportFailure(&fail, &captured.writer, .{ .color = false, .icons = false }));
-    try testing.expect(captured.written().len > 1);
+    try testing.expectEqual(@as(u8, 1), main.reportFailure(&why, &captured.writer, .{
+        .color = true,
+        .icons = false,
+    }));
+    try testing.expectEqualStrings("\x1b[31mNo skl.yaml here; run skl init.\x1b[0m\n", captured.written());
 }
 
 test "buildProgram declares every command" {
@@ -38,7 +42,7 @@ test "buildProgram declares every command" {
     defer scenario.destroy();
 
     const context = scenario.context();
-    const program = main.buildProgram(&context);
+    const program = try main.buildProgram(&context);
 
     for ([_][]const u8{ "init", "install", "add", "remove", "update", "list", "docs" }) |name| {
         try testing.expect(program.findSubcommand(name) != null);
@@ -51,7 +55,7 @@ test "the program help names every command" {
     defer scenario.destroy();
 
     const context = scenario.context();
-    const help = try commander.renderHelp(scenario.allocator(), main.buildProgram(&context));
+    const help = try commander.renderHelp(scenario.allocator(), try main.buildProgram(&context));
 
     try testing.expect(std.mem.startsWith(u8, help, "Usage: skl"));
     for ([_][]const u8{ "init", "install", "add", "remove", "update", "list", "docs" }) |name| {
@@ -59,14 +63,14 @@ test "the program help names every command" {
     }
 }
 
-test "bare parse of no args prints help and is Displayed" {
+test "bare parse of no args prints help and ends as displayed" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const context = scenario.context();
     var captured = std.Io.Writer.Allocating.init(scenario.allocator());
-    var runner = commander.Program{ .out = &captured.writer };
-    try testing.expectError(error.Displayed, commander.parse(&runner, main.buildProgram(&context), &.{}));
+    const outcome = try commander.parse(&captured.writer, try main.buildProgram(&context), &.{});
+    try testing.expect(outcome == .displayed);
     try testing.expect(std.mem.indexOf(u8, captured.written(), "Usage: skl") != null);
 }
 
@@ -77,19 +81,21 @@ test "init --from through Commander writes YAML and installs listed packages" {
     scenario.git.commands_repo = "cmds";
     const context = scenario.context();
     var captured = std.Io.Writer.Allocating.init(scenario.allocator());
-    var runner = commander.Program{ .out = &captured.writer };
-    try commander.parse(
-        &runner,
-        main.buildProgram(&context),
+    const outcome = try commander.parse(
+        &captured.writer,
+        try main.buildProgram(&context),
         &.{ "init", "--from", "acme/skl-config:teams/platform.yaml" },
     );
+    try testing.expectEqual(@as(u8, 0), outcome.ran);
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
     try testing.expect(scenario.git.calls.items.len >= 2);
     const dest = scenario.git.calls.items[0].argv[scenario.git.calls.items[0].argv.len - 1];
     try testing.expect(std.mem.indexOf(u8, dest, ".skilled") == null);
     const skills_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
-    const st = try std.Io.Dir.cwd().statFile(scenario.io(), skills_link, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(scenario.io(), skills_link, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
 
@@ -98,11 +104,16 @@ test "add --help and update --help mention --branch and --local" {
     defer scenario.destroy();
 
     const context = scenario.context();
-    const program = main.buildProgram(&context);
+    const program = try main.buildProgram(&context);
     const add_help = try commander.renderHelp(scenario.allocator(), program.findSubcommand("add").?);
     try testing.expect(std.mem.indexOf(u8, add_help, "--branch") != null);
     try testing.expect(std.mem.indexOf(u8, add_help, "--local") != null);
     const update_help = try commander.renderHelp(scenario.allocator(), program.findSubcommand("update").?);
     try testing.expect(std.mem.indexOf(u8, update_help, "--branch") != null);
     try testing.expect(std.mem.indexOf(u8, update_help, "--local") != null);
+}
+
+test "exitCodeOf is 137 for running out of memory and the reported code for anything else" {
+    try testing.expectEqual(@as(u8, 137), main.exitCodeOf(error.OutOfMemory, 1));
+    try testing.expectEqual(@as(u8, 1), main.exitCodeOf(error.FileNotFound, 1));
 }

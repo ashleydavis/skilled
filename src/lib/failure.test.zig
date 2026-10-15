@@ -6,43 +6,29 @@ const std = @import("std");
 const failure = @import("failure.zig");
 const testing = std.testing;
 
-test "set records the message and returns the error" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
+test "because formats the message into the failure" {
+    const made = failure.because("bad thing: {s}", .{"here"});
 
-    var fail = failure.Failure.init(arena.allocator());
-
-    //
-    // `set` hands back a bare error value rather than an error union, so it can be returned from a
-    // function whatever that function's success type is. That is why this compares it directly
-    // instead of using expectError, which wants a union to unwrap.
-    //
-    try testing.expectEqual(failure.Error.Failed, fail.set("bad thing: {s}", .{"here"}));
-    try testing.expectEqualStrings("bad thing: here", fail.text());
+    try testing.expectEqualStrings("bad thing: here", made.message());
 }
 
-test "the first message wins" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
+test "because cuts a message too long to hold and ends it in three dots" {
+    const long = "x" ** (failure.message_capacity + 10);
 
-    var fail = failure.Failure.init(arena.allocator());
-    _ = fail.set("first", .{}) catch {};
-    _ = fail.set("second", .{}) catch {};
-    try testing.expectEqualStrings("first", fail.text());
+    const made = failure.because("{s}", .{long});
+
+    try testing.expectEqual(@as(usize, failure.message_capacity), made.message().len);
+    try testing.expect(std.mem.endsWith(u8, made.message(), "..."));
 }
 
-test "text stands in when nothing was recorded" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
+test "a Result holds either its value or the failure" {
+    const ok: failure.Result(u8) = .{
+        .ok = 7,
+    };
+    const refused: failure.Result(u8) = .{
+        .failed = failure.because("no", .{}),
+    };
 
-    const fail = failure.Failure.init(arena.allocator());
-    try testing.expectEqualStrings("skl failed without saying why.", fail.text());
-}
-
-test "init leaves no message" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const fail = failure.Failure.init(arena.allocator());
-    try testing.expect(fail.message == null);
+    try testing.expectEqual(@as(u8, 7), ok.ok);
+    try testing.expectEqualStrings("no", refused.failed.message());
 }

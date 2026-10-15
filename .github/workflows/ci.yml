@@ -1,13 +1,16 @@
 #
-# Build and unit-test on every push and pull request.
+# Build, unit-test and fault test on every push and pull request.
 #
-# Linux, macOS, and Windows each compile and run `zig build test`. Smoke against the shipped
-# binary is the release workflow, not this file.
+# Linux, macOS, and Windows each compile and run `zig build test`. Linux also runs `zig build flt`,
+# which fault tests every function with Faultline; Faultline measures coverage with kcov and runs on
+# Linux only. Its results are kept between runs, so it executes only the files that changed. Smoke
+# against the shipped binary is the release workflow, not this file.
 #
 name: CI
 
 env:
   ZIG_VERSION: "0.16.0"
+  KCOV_VERSION: "v43"
 
 on:
   push:
@@ -45,3 +48,46 @@ jobs:
 
       - name: zig build test
         run: zig build test --summary all
+
+  fault-test:
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Built from its tagged source, so every run uses the same kcov whatever the runner's
+      # package archive holds.
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake binutils-dev libssl-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev
+          git clone --branch "$KCOV_VERSION" --depth 1 https://github.com/SimonKagstrom/kcov.git "$RUNNER_TEMP/kcov"
+          cmake -S "$RUNNER_TEMP/kcov" -B "$RUNNER_TEMP/kcov/build"
+          cmake --build "$RUNNER_TEMP/kcov/build" --parallel
+          sudo cmake --install "$RUNNER_TEMP/kcov/build"
+          kcov --version
+
+      # Faultline's result for each file and the crashes it keeps, so a run executes again only the
+      # files that changed since the last one. Saved under a key of its own every run, and restored
+      # from the latest earlier one.
+      - name: Restore Faultline's results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .zig-cache/flt-results
+            .zig-cache/flt-crashes.txt
+          key: faultline-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            faultline-${{ runner.os }}-
+
+      - name: zig build flt
+        run: zig build flt

@@ -4,16 +4,17 @@
 
 const std = @import("std");
 const init = @import("init.zig");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "init creates YAML when the project has none" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{})));
 
     const text = try scenario.readProjectYaml();
     try testing.expectEqualStrings("packages: []\n", text);
@@ -26,7 +27,7 @@ test "init leaves an existing empty YAML alone" {
 
     try scenario.writeProjectYaml("packages: []\n");
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{})));
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -43,7 +44,7 @@ test "init refuses to wipe a file that already lists packages" {
     try scenario.writeProjectYaml(original);
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{})));
 
     const after = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, after, "acme/skills") != null);
@@ -56,7 +57,9 @@ test "init -g writes the global config, not the project file" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .global = true }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{
+        .global = true,
+    })));
 
     try testing.expectError(error.FileNotFound, scenario.readProjectYaml());
     const global_path = try skilled.files.joinPath(scenario.allocator(), &.{
@@ -71,7 +74,9 @@ test "init --from creates a missing file from the fetched YAML" {
 
     scenario.git.commands_repo = "cmds";
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
@@ -88,7 +93,9 @@ test "init --from fills packages: []" {
     scenario.git.commands_repo = "cmds";
     try scenario.writeProjectYaml("packages: []\n");
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
@@ -109,8 +116,10 @@ test "init --from errors when packages are already listed and leaves YAML unchan
     try scenario.writeProjectYaml(original);
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "add --from") != null);
+    const why = try expect_result.failed(try init.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "add --from") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
     try testing.expect(std.mem.indexOf(u8, try scenario.readProjectYaml(), "acme/skills") != null);
     try testing.expect(std.mem.indexOf(u8, try scenario.readProjectYaml(), "acme/cmds") == null);
@@ -121,8 +130,10 @@ test "init --from rejects a bad spec without cloning" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, init.run(&ctx, .{ .from = "acme/skl-config" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "owner/repo:path") != null);
+    const why = try expect_result.failed(try init.run(&ctx, .{
+        .from = "acme/skl-config",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "owner/repo:path") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
     try testing.expectError(error.FileNotFound, scenario.readProjectYaml());
 }
@@ -136,8 +147,10 @@ test "init --from leaves YAML unchanged when the file at ref:path is missing" {
     scenario.git.show_stderr = "fatal: path 'teams/missing.yaml' does not exist in 'HEAD'\n";
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, init.run(&ctx, .{ .from = "acme/skl-config:teams/missing.yaml" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "git show") != null);
+    const why = try expect_result.failed(try init.run(&ctx, .{
+        .from = "acme/skl-config:teams/missing.yaml",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "git show") != null);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -146,8 +159,7 @@ test "missing-config is not an error for init" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
-    try testing.expect(scenario.fail.message == null);
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{})));
 }
 
 //
@@ -174,7 +186,9 @@ fn expectFromInstalledPackages(scenario: *harness.Scenario) !void {
 // Asserts path exists as a symlink.
 //
 fn expectSymlink(io: std.Io, path: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
 
@@ -203,7 +217,7 @@ test "init creates the scratch trees and links them" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{})));
 
     const scratch_dir = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".skilled", "scratch" });
     try expectDirectory(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ scratch_dir, "skills" }));
@@ -219,12 +233,12 @@ test "init restores a deleted scratch link" {
     defer scenario.destroy();
 
     const first = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&first, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&first, .{})));
     const links = try scratchLinks(scenario, scenario.cwd);
     try removeLink(scenario.io(), links[2]);
 
     const second = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&second, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&second, .{})));
     try expectScratchSymlink(scenario.io(), links[2]);
 }
 
@@ -233,7 +247,9 @@ test "init -g links the scratch directory under home" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .global = true }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{
+        .global = true,
+    })));
 
     try expectDirectory(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{
         scenario.home, ".skilled", "scratch", "skills",
@@ -242,7 +258,9 @@ test "init -g links the scratch directory under home" {
         try expectScratchSymlink(scenario.io(), path);
     }
     const project_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "loc" });
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), project_link, .{ .follow_symlinks = false }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), project_link, .{
+        .follow_symlinks = false,
+    }));
 }
 
 test "init --from links the scratch directory as well as the packages" {
@@ -251,7 +269,9 @@ test "init --from links the scratch directory as well as the packages" {
 
     scenario.git.commands_repo = "cmds";
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     for (try scratchLinks(scenario, scenario.cwd)) |path| {
         try expectScratchSymlink(scenario.io(), path);
@@ -264,7 +284,9 @@ test "init --from links the scratch directory as well as the packages" {
 // Asserts path exists as a real directory.
 //
 fn expectDirectory(io: std.Io, path: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.directory, st.kind);
 }
 
@@ -297,6 +319,8 @@ fn removeLink(io: std.Io, path: []const u8) !void {
 // Asserts path exists as a symlink.
 //
 fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }

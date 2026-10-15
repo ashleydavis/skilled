@@ -31,11 +31,6 @@ const paths = @import("paths.zig");
 const remote = @import("remote.zig");
 
 //
-// Alias so signatures read as Failure rather than failure.Failure.
-//
-const Failure = failure.Failure;
-
-//
 // Whether linking had anything to do, so a caller can stay quiet when it did not.
 //
 pub const Status = enum {
@@ -68,29 +63,71 @@ pub fn linkPackage(
     store_dir: []const u8,
     namespace: []const u8,
     scope: paths.Scope,
-    fail: *Failure,
-) failure.Error!Status {
-    try remote.validateName(namespace, "namespace", fail);
-    var changed = false;
+) std.mem.Allocator.Error!failure.Result(Status) {
+    switch (remote.validateName(namespace, "namespace")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     const skills_dir = try files.joinPath(allocator, &.{ store_dir, "skills" });
     const commands_dir = try files.joinPath(allocator, &.{ store_dir, "commands" });
     const has_skills = isDirectory(io, skills_dir, true);
     const has_commands = isDirectory(io, commands_dir, true);
+
+    var changed = false;
     if (has_skills) {
-        changed = try linkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_skills, fail) or changed;
+        switch (try linkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_skills)) {
+            .ok => |made| changed = made or changed,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
         if (has_commands) {
-            changed = try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills, fail) or changed;
+            switch (try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills)) {
+                .ok => |made| changed = made or changed,
+                .failed => |why| return .{
+                    .failed = why,
+                },
+            }
         } else {
-            changed = try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands, fail) or changed;
+            switch (try linkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands)) {
+                .ok => |made| changed = made or changed,
+                .failed => |why| return .{
+                    .failed = why,
+                },
+            }
         }
     }
     if (has_commands) {
-        changed = try linkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands, fail) or changed;
-        changed = try linkTree(io, allocator, store_dir, "commands", namespace, scope.claude_commands, fail) or changed;
+        switch (try linkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands)) {
+            .ok => |made| changed = made or changed,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
+        switch (try linkTree(io, allocator, store_dir, "commands", namespace, scope.claude_commands)) {
+            .ok => |made| changed = made or changed,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
-    changed = try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_skills, fail) or changed;
-    changed = try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands, fail) or changed;
-    return if (changed) .changed else .unchanged;
+    switch (try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_skills)) {
+        .ok => |made| changed = made or changed,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands)) {
+        .ok => |made| changed = made or changed,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = if (changed) .changed else .unchanged,
+    };
 }
 
 //
@@ -107,32 +144,71 @@ pub fn unlinkPackage(
     store_dir: []const u8,
     namespace: []const u8,
     scope: paths.Scope,
-    fail: *Failure,
-) failure.Error!void {
-    try remote.validateName(namespace, "namespace", fail);
-    _ = try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_skills, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_skills, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.claude_commands, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands, fail);
-    _ = try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands, fail);
+) std.mem.Allocator.Error!failure.Result(void) {
+    switch (remote.validateName(namespace, "namespace")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_skills)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_skills)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_skills)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.claude_commands)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.claude_commands)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "commands", namespace, scope.cursor_commands)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try unlinkTree(io, allocator, store_dir, "skills", namespace, scope.cursor_commands)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .ok;
 }
 
 //
-// Turns a failed symlink create into a Failure.
+// The failure for a symlink that could not be created.
 //
 // AccessDenied and PermissionDenied mention Developer Mode because that is what Windows needs
 // (or an equivalent privilege) to create directory symlinks; the code never falls back to copying.
-// Pub so tests can fake the syscall failure without a host that refuses directory symlinks.
 //
-pub fn mapSymlinkError(err: anyerror, path: []const u8, fail: *Failure) failure.Error {
+pub fn symlinkFailure(err: anyerror, path: []const u8) failure.Failure {
     switch (err) {
-        error.AccessDenied, error.PermissionDenied => return fail.set(
+        error.AccessDenied, error.PermissionDenied => return failure.because(
             "Cannot create symlink {s}: enable Developer Mode (or equivalent) to allow directory symlinks.",
             .{path},
         ),
-        else => return fail.set("Cannot create symlink {s}: {s}.", .{ path, files.describeError(err) }),
+        else => return failure.because("Cannot create symlink {s}: {s}.", .{ path, files.describeError(err) }),
     }
 }
 
@@ -146,16 +222,29 @@ fn linkTree(
     tree: []const u8,
     namespace: []const u8,
     agent_root: []const u8,
-    fail: *Failure,
-) failure.Error!bool {
+) std.mem.Allocator.Error!failure.Result(bool) {
     const store_tree = try files.joinPath(allocator, &.{ store_dir, tree });
     if (!isDirectory(io, store_tree, true)) {
-        return false;
+        return .{
+            .ok = false,
+        };
     }
-    const made_root = try ensureAgentRoot(io, agent_root, fail);
+    const made_root = switch (ensureAgentRoot(io, agent_root)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     const link_path = try files.joinPath(allocator, &.{ agent_root, namespace });
-    const placed = try placeSymlink(io, store_tree, link_path, fail);
-    return made_root or placed;
+    const placed = switch (placeSymlink(io, store_tree, link_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return .{
+        .ok = made_root or placed,
+    };
 }
 
 //
@@ -168,29 +257,47 @@ fn unlinkTree(
     tree: []const u8,
     namespace: []const u8,
     agent_root: []const u8,
-    fail: *Failure,
-) failure.Error!bool {
+) std.mem.Allocator.Error!failure.Result(bool) {
     const store_tree = try files.joinPath(allocator, &.{ store_dir, tree });
     const link_path = try files.joinPath(allocator, &.{ agent_root, namespace });
-    const st = std.Io.Dir.cwd().statFile(io, link_path, .{ .follow_symlinks = false }) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => return fail.set("Cannot stat {s}: {s}.", .{ link_path, files.describeError(err) }),
+    const st = std.Io.Dir.cwd().statFile(io, link_path, .{
+        .follow_symlinks = false,
+    }) catch |err| switch (err) {
+        error.FileNotFound => return .{
+            .ok = false,
+        },
+        else => return .{
+            .failed = failure.because("Cannot stat {s}: {s}.", .{ link_path, files.describeError(err) }),
+        },
     };
     if (st.kind != .sym_link) {
-        return false;
+        return .{
+            .ok = false,
+        };
     }
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const n = std.Io.Dir.cwd().readLink(io, link_path, &buffer) catch |err| {
-        return fail.set("Cannot read symlink {s}: {s}.", .{ link_path, files.describeError(err) });
+        return .{
+            .failed = failure.because("Cannot read symlink {s}: {s}.", .{ link_path, files.describeError(err) }),
+        };
     };
     //
     // Windows CI: dest had `/`, readLink had `\`. Byte equality skipped the delete.
     //
     if (!files.samePath(buffer[0..n], store_tree)) {
-        return false;
+        return .{
+            .ok = false,
+        };
     }
-    try removeSymlink(io, link_path, fail);
-    return true;
+    switch (removeSymlink(io, link_path)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = true,
+    };
 }
 
 //
@@ -199,10 +306,22 @@ fn unlinkTree(
 // Checked without following symlinks first so a folded parent (a symlink to the store) is refused
 // rather than written through.
 //
-fn ensureAgentRoot(io: std.Io, agent_root: []const u8, fail: *Failure) failure.Error!bool {
-    const made_parent = try ensureRealDirectory(io, files.dirName(agent_root), fail);
-    const made_root = try ensureRealDirectory(io, agent_root, fail);
-    return made_parent or made_root;
+fn ensureAgentRoot(io: std.Io, agent_root: []const u8) failure.Result(bool) {
+    const made_parent = switch (ensureRealDirectory(io, files.dirName(agent_root))) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const made_root = switch (ensureRealDirectory(io, agent_root)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return .{
+        .ok = made_parent or made_root,
+    };
 }
 
 //
@@ -212,78 +331,126 @@ fn ensureAgentRoot(io: std.Io, agent_root: []const u8, fail: *Failure) failure.E
 // Pub because the scratch module creates `<scratch>/skills` and `<scratch>/commands` with it, so a
 // symlink or a regular file at either path is refused in the same words as an agent root.
 //
-pub fn ensureRealDirectory(io: std.Io, path: []const u8, fail: *Failure) failure.Error!bool {
-    const st = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch |err| switch (err) {
+pub fn ensureRealDirectory(io: std.Io, path: []const u8) failure.Result(bool) {
+    const st = std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    }) catch |err| switch (err) {
         error.FileNotFound => {
             files.makeDirPath(io, path) catch |create_err| {
-                return fail.set("Cannot create directory {s}: {s}.", .{ path, files.describeError(create_err) });
+                return .{
+                    .failed = failure.because("Cannot create directory {s}: {s}.", .{ path, files.describeError(create_err) }),
+                };
             };
-            return true;
+            return .{
+                .ok = true,
+            };
         },
-        else => return fail.set("Cannot stat {s}: {s}.", .{ path, files.describeError(err) }),
+        else => return .{
+            .failed = failure.because("Cannot stat {s}: {s}.", .{ path, files.describeError(err) }),
+        },
     };
     if (st.kind == .sym_link) {
-        return fail.set("{s} is a symlink; expected a real directory.", .{path});
+        return .{
+            .failed = failure.because("{s} is a symlink; expected a real directory.", .{path}),
+        };
     }
     if (st.kind != .directory) {
-        return fail.set("{s} exists and is not a directory.", .{path});
+        return .{
+            .failed = failure.because("{s} exists and is not a directory.", .{path}),
+        };
     }
-    return false;
+    return .{
+        .ok = false,
+    };
 }
 
 //
 // Creates dest ← link_path, or leaves an existing symlink that already names dest.
 //
-fn placeSymlink(io: std.Io, dest: []const u8, link_path: []const u8, fail: *Failure) failure.Error!bool {
-    const st = std.Io.Dir.cwd().statFile(io, link_path, .{ .follow_symlinks = false }) catch |err| switch (err) {
+fn placeSymlink(io: std.Io, dest: []const u8, link_path: []const u8) failure.Result(bool) {
+    const st = std.Io.Dir.cwd().statFile(io, link_path, .{
+        .follow_symlinks = false,
+    }) catch |err| switch (err) {
         error.FileNotFound => {
-            std.Io.Dir.cwd().symLink(io, dest, link_path, .{ .is_directory = true }) catch |create_err| {
-                return mapSymlinkError(create_err, link_path, fail);
+            std.Io.Dir.cwd().symLink(io, dest, link_path, .{
+                .is_directory = true,
+            }) catch |create_err| {
+                return .{
+                    .failed = symlinkFailure(create_err, link_path),
+                };
             };
-            return true;
+            return .{
+                .ok = true,
+            };
         },
-        else => return fail.set("Cannot stat {s}: {s}.", .{ link_path, files.describeError(err) }),
+        else => return .{
+            .failed = failure.because("Cannot stat {s}: {s}.", .{ link_path, files.describeError(err) }),
+        },
     };
     if (st.kind != .sym_link) {
-        return fail.set("{s} exists and is not a symlink; will not overwrite.", .{link_path});
+        return .{
+            .failed = failure.because("{s} exists and is not a symlink; will not overwrite.", .{link_path}),
+        };
     }
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const n = std.Io.Dir.cwd().readLink(io, link_path, &buffer) catch |err| {
-        return fail.set("Cannot read symlink {s}: {s}.", .{ link_path, files.describeError(err) });
+        return .{
+            .failed = failure.because("Cannot read symlink {s}: {s}.", .{ link_path, files.describeError(err) }),
+        };
     };
     //
     // Windows CI: dest had `/`, readLink had `\`. Byte equality made a correct link look foreign.
     //
     if (files.samePath(buffer[0..n], dest)) {
-        return false;
+        return .{
+            .ok = false,
+        };
     }
-    try removeSymlink(io, link_path, fail);
-    std.Io.Dir.cwd().symLink(io, dest, link_path, .{ .is_directory = true }) catch |create_err| {
-        return mapSymlinkError(create_err, link_path, fail);
+    switch (removeSymlink(io, link_path)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    std.Io.Dir.cwd().symLink(io, dest, link_path, .{
+        .is_directory = true,
+    }) catch |create_err| {
+        return .{
+            .failed = symlinkFailure(create_err, link_path),
+        };
     };
-    return true;
+    return .{
+        .ok = true,
+    };
 }
 
 //
 // Deletes a symlink at link_path. Directory symlinks on Windows look like directories to
 // deleteFile, so IsDir falls through to deleteDir rather than leaving the link in place.
 //
-fn removeSymlink(io: std.Io, link_path: []const u8, fail: *Failure) failure.Error!void {
+fn removeSymlink(io: std.Io, link_path: []const u8) failure.Result(void) {
     std.Io.Dir.cwd().deleteFile(io, link_path) catch |err| switch (err) {
         error.IsDir => {
             std.Io.Dir.cwd().deleteDir(io, link_path) catch |dir_err| {
-                return fail.set("Cannot remove symlink {s}: {s}.", .{ link_path, files.describeError(dir_err) });
+                return .{
+                    .failed = failure.because("Cannot remove symlink {s}: {s}.", .{ link_path, files.describeError(dir_err) }),
+                };
             };
         },
-        else => return fail.set("Cannot remove symlink {s}: {s}.", .{ link_path, files.describeError(err) }),
+        else => return .{
+            .failed = failure.because("Cannot remove symlink {s}: {s}.", .{ link_path, files.describeError(err) }),
+        },
     };
+    return .ok;
 }
 
 //
 // True when path is a directory, optionally following a symlink to one.
 //
 fn isDirectory(io: std.Io, path: []const u8, follow_symlinks: bool) bool {
-    const st = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = follow_symlinks }) catch return false;
+    const st = std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = follow_symlinks,
+    }) catch return false;
     return st.kind == .directory;
 }
 

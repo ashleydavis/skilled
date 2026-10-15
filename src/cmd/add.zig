@@ -18,6 +18,11 @@ const shared = @import("shared.zig");
 const commander = skilled.commander;
 
 //
+// How a refused command says why: the failure returned in place of the exit code.
+//
+const failure = skilled.failure;
+
+//
 // YAML read/write after a successful scan or `--from` merge.
 //
 const config = skilled.config;
@@ -104,79 +109,157 @@ pub const Args = struct {
 // clone or scan leaves the YAML unchanged. A clone of an invalid package may leave a store dest.
 // `--from` does not clone skill packages or link; the user runs `skl install`.
 //
-pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
+pub fn run(ctx: *const Context, args: Args) std.mem.Allocator.Error!failure.Result(u8) {
     if (args.from) |spec| {
         if (args.repo != null) {
-            return ctx.fail.set("Cannot use add --from together with a repo.", .{});
+            return .{
+                .failed = failure.because("Cannot use add --from together with a repo.", .{}),
+            };
         }
         if (args.namespace != null) {
-            return ctx.fail.set("The --ns flag is not used with --from.", .{});
+            return .{
+                .failed = failure.because("The --ns flag is not used with --from.", .{}),
+            };
         }
         if (args.branch != null) {
-            return ctx.fail.set("The --branch flag is not used with --from.", .{});
+            return .{
+                .failed = failure.because("The --branch flag is not used with --from.", .{}),
+            };
         }
         if (args.local != null) {
-            return ctx.fail.set("The --local flag is not used with --from.", .{});
+            return .{
+                .failed = failure.because("The --local flag is not used with --from.", .{}),
+            };
         }
         return runFrom(ctx, args.global, spec);
     }
     if (args.branch != null and args.local != null) {
-        return ctx.fail.set("The --branch flag cannot be used with --local.", .{});
+        return .{
+            .failed = failure.because("The --branch flag cannot be used with --local.", .{}),
+        };
     }
-    const spec = args.repo orelse return ctx.fail.set("The add command requires a repo or --from.", .{});
+    const spec = args.repo orelse return .{
+        .failed = failure.because("The add command requires a repo or --from.", .{}),
+    };
 
     const scope = try shared.scopeOf(ctx, args.global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
 
-    const namespace = try resolveNamespace(ctx, args.namespace);
-    try remote.validateName(namespace, "namespace", ctx.fail);
+    const namespace = switch (try resolveNamespace(ctx, args.namespace)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (remote.validateName(namespace, "namespace")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     //
     // Before the clone and before the YAML write, so a refused namespace leaves nothing behind.
     // The interactive prompt returns into this same variable, so it is checked too.
     //
     if (scratch.isReserved(namespace)) {
-        return ctx.fail.set("Namespace \"{s}\" is reserved for the scratch directory.", .{namespace});
+        return .{
+            .failed = failure.because("Namespace \"{s}\" is reserved for the scratch directory.", .{namespace}),
+        };
     }
     if (shared.namespaceTaken(file.packages, namespace)) |taken| {
-        return ctx.fail.set("Namespace \"{s}\" is already used by {s}.", .{ namespace, taken.repo });
+        return .{
+            .failed = failure.because("Namespace \"{s}\" is already used by {s}.", .{ namespace, taken.repo }),
+        };
     }
 
     var spinner = shared.newSpinner(ctx);
     defer spinner.finish();
 
     if (args.local) |local_path| {
-        const dest = try shared.resolveLocal(ctx, local_path);
+        const dest = switch (try shared.resolveLocal(ctx, local_path)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
         const appended = try appendPackage(ctx.allocator, file, .{
             .repo = spec,
             .namespace = namespace,
             .local = dest,
         });
-        try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended, ctx.fail);
+        switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
         spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ namespace, spec }));
-        _ = try link.linkPackage(ctx.io, ctx.allocator, dest, namespace, scope, ctx.fail);
+        switch (try link.linkPackage(ctx.io, ctx.allocator, dest, namespace, scope)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
         spinner.finish();
-        const local_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, dest, ctx.fail);
-        try shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
+        const local_sha = switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, dest)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
+        switch (shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
             ctx.style.check(),
             try shared.identifier(ctx, spec),
             try shared.namespaceText(ctx, namespace),
             try shared.muted(ctx, shared.shortSha(local_sha)),
-        });
-        return 0;
+        })) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
+        return .{
+            .ok = 0,
+        };
     }
 
-    const resolved = try shared.ensureCloned(ctx, spec, args.branch, &spinner);
-    _ = try package.scan(ctx.io, ctx.allocator, resolved.dest, ctx.fail);
+    const resolved = switch (try shared.ensureCloned(ctx, spec, args.branch, &spinner)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (try package.scan(ctx.io, ctx.allocator, resolved.dest)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
 
     const appended = try appendPackage(ctx.allocator, file, .{
         .repo = spec,
         .namespace = namespace,
         .branch = args.branch,
     });
-    try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended, ctx.fail);
+    switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, appended)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
 
     spinner.linking(try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ namespace, resolved.parsed.repo }));
-    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, namespace, scope, ctx.fail);
+    switch (try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, namespace, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     spinner.finish();
 
     const added = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{
@@ -189,49 +272,77 @@ pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
     // directory is the one tree that is not, and it is never added — so a clone that cannot report
     // HEAD is a real failure, not a line printed without its SHA.
     //
-    const sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
-    try shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
+    const sha = switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (shared.line(ctx, "{s} Added {s} as {s} at {s}.", .{
         ctx.style.check(),
         try shared.identifier(ctx, added),
         try shared.namespaceText(ctx, namespace),
         try shared.muted(ctx, shared.shortSha(sha)),
-    });
-    return 0;
+    })) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds the `add` command. `[repo]` is optional so `--from` can occupy the line.
 //
-pub fn buildCommand(ctx: *const Context) *Command {
-    return Command.init(ctx.allocator, "add")
+pub fn buildCommand(ctx: *const Context) std.mem.Allocator.Error!*Command {
+    const command = (try Command.init(ctx.allocator, "add"))
         .description("Clone a package, append YAML, and link it.")
         .argument("[repo]", "The package to add.")
-        .option("--ns <namespace>", "The namespace to install under.", null)
-        .option("--from <spec>", "A YAML file inside a git repo.", null)
-        .option("--branch <name>", "Clone this branch instead of the default.", null)
-        .option("--local <path>", "Link a local working tree instead of cloning.", null)
         .action(ctx, action);
+    try command.option("--ns <namespace>", "The namespace to install under.", null);
+    try command.option("--from <spec>", "A YAML file inside a git repo.", null);
+    try command.option("--branch <name>", "Clone this branch instead of the default.", null);
+    try command.option("--local <path>", "Link a local working tree instead of cloning.", null);
+    return command;
 }
 
 //
 // `--ns` when given, a prompt when interactive, or an error that names `--ns`.
 //
-fn resolveNamespace(ctx: *const Context, namespace_opt: ?[]const u8) skilled.failure.Error![]const u8 {
+fn resolveNamespace(ctx: *const Context, namespace_opt: ?[]const u8) std.mem.Allocator.Error!failure.Result([]const u8) {
     if (namespace_opt) |ns| {
         if (ns.len == 0) {
-            return ctx.fail.set("The --ns flag is required.", .{});
+            return .{
+                .failed = failure.because("The --ns flag is required.", .{}),
+            };
         }
-        return ns;
+        return .{
+            .ok = ns,
+        };
     }
     if (ctx.non_interactive) {
-        return ctx.fail.set("The --ns flag is required.", .{});
+        return .{
+            .failed = failure.because("The --ns flag is required.", .{}),
+        };
     }
     shared.promptWrite(ctx, "Namespace: ", .{});
-    const ns = try shared.promptLine(ctx);
+    const ns = switch (try shared.promptLine(ctx)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     if (ns.len == 0) {
-        return ctx.fail.set("The --ns flag is required.", .{});
+        return .{
+            .failed = failure.because("The --ns flag is required.", .{}),
+        };
     }
-    return ns;
+    return .{
+        .ok = ns,
+    };
 }
 
 //
@@ -247,28 +358,59 @@ fn appendPackage(
         packages[i] = existing;
     }
     packages[file.packages.len] = pkg;
-    return .{ .packages = packages };
+    return .{
+        .packages = packages,
+    };
 }
 
 //
 // Appends packages from a YAML file in git into an existing skl.yaml. Does not clone or link.
 //
-fn runFrom(ctx: *const Context, global: bool, spec: []const u8) skilled.failure.Error!u8 {
+fn runFrom(ctx: *const Context, global: bool, spec: []const u8) std.mem.Allocator.Error!failure.Result(u8) {
     const scope = try shared.scopeOf(ctx, global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
-    const fetched = try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec, ctx.fail);
-    const merged = try from.mergePackages(ctx.allocator, file.packages, fetched.packages, ctx.fail);
-    try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = merged }, ctx.fail);
-    try shared.line(ctx, "Updated {s}.", .{try shared.muted(ctx, scope.config_path)});
-    return 0;
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const fetched = switch (try from.fetchConfig(ctx.io, ctx.allocator, ctx.environ, ctx.git, spec)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const merged = switch (try from.mergePackages(ctx.allocator, file.packages, fetched.packages)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{
+        .packages = merged,
+    })) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (shared.line(ctx, "Updated {s}.", .{try shared.muted(ctx, scope.config_path)})) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Unpacks Commander options and runs add.
 //
-fn action(invocation: *commander.Invocation) anyerror!void {
+fn action(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
-    invocation.exit_code = try run(ctx, .{
+    return run(ctx, .{
         .global = invocation.option("global") != null,
         .repo = if (invocation.args.len > 0) invocation.args[0] else null,
         .namespace = invocation.option("ns"),

@@ -8,6 +8,7 @@ const files = @import("files.zig");
 const paths = @import("paths.zig");
 const remote = @import("remote.zig");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 //
 // A POSIX-looking home used when joining a parsed remote onto a store path.
@@ -18,9 +19,8 @@ test "parse expands owner/repo to github.com SSH and strips .git from the packag
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try remote.parse(allocator, "acme/skills.git", &fail);
+    const got = try expect_result.ok(try remote.parse(allocator, "acme/skills.git"));
     try testing.expectEqualStrings("git@github.com:acme/skills.git", got.clone_url);
     try testing.expectEqualStrings("github.com", got.host);
     try testing.expectEqualStrings("acme", got.owner);
@@ -31,10 +31,9 @@ test "parse keeps an SSH URL as-is and strips .git from the package name" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
     const spec = "git@github.com:acme/skills.git";
-    const got = try remote.parse(allocator, spec, &fail);
+    const got = try expect_result.ok(try remote.parse(allocator, spec));
     try testing.expectEqualStrings(spec, got.clone_url);
     try testing.expectEqualStrings("github.com", got.host);
     try testing.expectEqualStrings("acme", got.owner);
@@ -45,10 +44,9 @@ test "parse keeps an SSH URL that has no .git suffix" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
     const spec = "git@github.com:acme/skills";
-    const got = try remote.parse(allocator, spec, &fail);
+    const got = try expect_result.ok(try remote.parse(allocator, spec));
     try testing.expectEqualStrings(spec, got.clone_url);
     try testing.expectEqualStrings("skills", got.repo);
 }
@@ -57,20 +55,18 @@ test "parse rejects HTTPS" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, remote.parse(allocator, "https://github.com/acme/skills", &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "HTTPS") != null);
+    const why = try expect_result.failed(try remote.parse(allocator, "https://github.com/acme/skills"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "HTTPS") != null);
 }
 
 test "parse rejects a github: scheme" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectError(error.Failed, remote.parse(allocator, "github:acme/skills", &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "github:") != null);
+    const why = try expect_result.failed(try remote.parse(allocator, "github:acme/skills"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "github:") != null);
 }
 
 test "parse rejects a filesystem path" {
@@ -80,9 +76,8 @@ test "parse rejects a filesystem path" {
 
     const specs = [_][]const u8{ "/tmp/some-path", "./skills", "../skills", "file:///tmp/skills" };
     for (specs) |spec| {
-        var fail = failure.Failure.init(allocator);
-        try testing.expectError(error.Failed, remote.parse(allocator, spec, &fail));
-        try testing.expect(std.mem.indexOf(u8, fail.text(), "Filesystem") != null);
+        const why = try expect_result.failed(try remote.parse(allocator, spec));
+        try testing.expect(std.mem.indexOf(u8, why.message(), "Filesystem") != null);
     }
 }
 
@@ -99,8 +94,7 @@ test "parse rejects .. in owner, repo, and host" {
         "git@github..com:acme/skills.git",
     };
     for (specs) |spec| {
-        var fail = failure.Failure.init(allocator);
-        try testing.expectError(error.Failed, remote.parse(allocator, spec, &fail));
+        _ = try expect_result.failed(try remote.parse(allocator, spec));
     }
 }
 
@@ -109,13 +103,11 @@ test "parse rejects a colon in owner or repo" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var owner_fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, remote.parse(allocator, "acme:org/skills", &owner_fail));
-    try testing.expect(std.mem.indexOf(u8, owner_fail.text(), "owner") != null);
+    const why = try expect_result.failed(try remote.parse(allocator, "acme:org/skills"));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "owner") != null);
 
-    var repo_fail = failure.Failure.init(allocator);
-    try testing.expectError(error.Failed, remote.parse(allocator, "acme/ski:lls", &repo_fail));
-    try testing.expect(std.mem.indexOf(u8, repo_fail.text(), "repo") != null);
+    const why_2 = try expect_result.failed(try remote.parse(allocator, "acme/ski:lls"));
+    try testing.expect(std.mem.indexOf(u8, why_2.message(), "repo") != null);
 }
 
 test "parse rejects empty owner, repo, host, and spec" {
@@ -125,50 +117,31 @@ test "parse rejects empty owner, repo, host, and spec" {
 
     const specs = [_][]const u8{ "", "acme/", "/skills", "git@github.com:/skills", "git@:acme/skills" };
     for (specs) |spec| {
-        var fail = failure.Failure.init(allocator);
-        try testing.expectError(error.Failed, remote.parse(allocator, spec, &fail));
+        _ = try expect_result.failed(try remote.parse(allocator, spec));
     }
 }
 
 test "validateName rejects slash, colon, empty, dot, and Windows-illegal characters" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
     const bad = [_][]const u8{ "", ".", "..", "foo/bar", "foo\\bar", "foo:bar", "foo<bar", "foo>bar", "foo|bar", "foo\"bar", "foo?bar", "foo*bar" };
     for (bad) |name| {
-        var fail = failure.Failure.init(allocator);
-        try testing.expectError(error.Failed, remote.validateName(name, "namespace", &fail));
+        _ = try expect_result.failed(remote.validateName(name, "namespace"));
     }
 }
 
 test "validateName accepts a namespace that later steps will use under skills/" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    var fail = failure.Failure.init(arena.allocator());
-
-    try remote.validateName("demo", "namespace", &fail);
-    try remote.validateName("cmd.v2", "namespace", &fail);
+    try expect_result.ok(remote.validateName("demo", "namespace"));
+    try expect_result.ok(remote.validateName("cmd.v2", "namespace"));
 }
 
 test "validateBranch accepts main and feature/foo" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    var fail = failure.Failure.init(arena.allocator());
-
-    try remote.validateBranch("main", &fail);
-    try remote.validateBranch("feature/foo", &fail);
+    try expect_result.ok(remote.validateBranch("main"));
+    try expect_result.ok(remote.validateBranch("feature/foo"));
 }
 
 test "validateBranch rejects empty, HEAD, dash prefix, dot-dot, empty segments, and colon" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
     const bad = [_][]const u8{ "", "HEAD", "head", "-n", "..", "a//b", "foo:bar" };
     for (bad) |name| {
-        var fail = failure.Failure.init(allocator);
-        try testing.expectError(error.Failed, remote.validateBranch(name, &fail));
+        _ = try expect_result.failed(remote.validateBranch(name));
     }
 }
 
@@ -176,9 +149,8 @@ test "parse maps an enterprise SSH URL onto store/host/owner/repo" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var fail = failure.Failure.init(allocator);
 
-    const got = try remote.parse(allocator, "git@github.example.com:acme/skills.git", &fail);
+    const got = try expect_result.ok(try remote.parse(allocator, "git@github.example.com:acme/skills.git"));
     try testing.expectEqualStrings("git@github.example.com:acme/skills.git", got.clone_url);
     try testing.expectEqualStrings("github.example.com", got.host);
     try testing.expectEqualStrings("acme", got.owner);
@@ -188,4 +160,19 @@ test "parse maps an enterprise SSH URL onto store/host/owner/repo" {
     const clone_path = try paths.clonePath(allocator, store_dir, got.host, got.owner, got.repo, "main");
     const expected = try files.joinPath(allocator, &.{ store_dir, "github.example.com", "acme", "skills@main" });
     try testing.expectEqualStrings(expected, clone_path);
+}
+
+test "parseSsh refuses a spec that does not start with git@, a shorter one included" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    for ([_][]const u8{ "", "g", "git", "acme/skills" }) |spec| {
+        const why = try expect_result.failed(try remote.parseSsh(allocator, spec));
+        try testing.expect(std.mem.indexOf(u8, why.message(), "Invalid SSH remote") != null);
+    }
+}
+
+test "isFilesystemPath is false for an empty spec" {
+    try testing.expect(!remote.isFilesystemPath(""));
 }

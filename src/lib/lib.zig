@@ -6,7 +6,7 @@
 // and src/cmd.
 //
 // Most of what is here takes everything it needs as arguments and touches no global state: no argv,
-// no working directory, no stdout. That is what makes it reachable from a unit test.
+// no working directory, no stdout.
 //
 
 //

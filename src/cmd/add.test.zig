@@ -4,21 +4,24 @@
 
 const std = @import("std");
 const add = @import("add.zig");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const init = @import("init.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "add requires --ns when non-interactive" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--ns") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/skills",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "--ns") != null);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -27,11 +30,13 @@ test "add prompts for --ns when interactive" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     scenario.stdin_bytes = "demo\n";
     const ctx = scenario.contextInteractive(false);
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{ .repo = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
+        .repo = "acme/skills",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: demo") != null);
@@ -49,8 +54,11 @@ test "add rejects a duplicate namespace" {
     );
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/both", .namespace = "demo" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "already used") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/both",
+        .namespace = "demo",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "already used") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 }
 
@@ -59,11 +67,14 @@ test "add rejects an invalid namespace" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .namespace = ".." }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "namespace") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "..",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "namespace") != null);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -72,14 +83,17 @@ test "add clone-then-YAML: failed scan leaves YAML unchanged" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     scenario.git.empty_repo = "empty";
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/empty", .namespace = "empty" }));
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/empty",
+        .namespace = "empty",
+    }));
 
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "skills/") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "skills/") != null);
 }
 
 test "add clones, appends YAML, and links" {
@@ -87,10 +101,13 @@ test "add clones, appends YAML, and links" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
@@ -102,7 +119,9 @@ test "add clones, appends YAML, and links" {
     try testing.expect(skilled.files.fileExists(scenario.io(), try skilled.files.joinPath(scenario.allocator(), &.{ dest, "skills/hello/SKILL.md" })));
 
     const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
-    const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
 }
 
@@ -111,10 +130,12 @@ test "add --from after init appends packages and does not clone skill packages" 
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
@@ -145,7 +166,9 @@ test "add --from keeps an existing extra package" {
     );
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: keep") != null);
@@ -166,7 +189,9 @@ test "add --from skips the same namespace and same package" {
     );
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "namespace: demo") != null);
@@ -187,8 +212,10 @@ test "add --from errors when a namespace is taken by a different repo" {
     const before = try scenario.readProjectYaml();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "already used") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "already used") != null);
     try testing.expectEqualStrings(before, try scenario.readProjectYaml());
 }
 
@@ -197,8 +224,10 @@ test "add --from errors when skl.yaml is missing" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .from = "acme/skl-config:teams/platform.yaml" }));
-    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .from = "acme/skl-config:teams/platform.yaml",
+    }));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", why.message());
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 }
 
@@ -207,14 +236,14 @@ test "add --from with a repo argument errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{
+    const why = try expect_result.failed(try add.run(&ctx, .{
         .repo = "acme/skills",
         .from = "acme/skl-config:teams/platform.yaml",
     }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "repo") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "repo") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
@@ -224,14 +253,14 @@ test "add --from with --ns errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{
+    const why = try expect_result.failed(try add.run(&ctx, .{
         .namespace = "demo",
         .from = "acme/skl-config:teams/platform.yaml",
     }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--ns") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "--ns") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 }
 
@@ -240,8 +269,11 @@ test "add without config errors with the missing-config message" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
-    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    }));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", why.message());
 }
 
 test "add --branch writes branch in YAML and clone argv includes --branch" {
@@ -249,14 +281,14 @@ test "add --branch writes branch in YAML and clone argv includes --branch" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .branch = "feature",
-    }));
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "branch: feature") != null);
@@ -270,14 +302,14 @@ test "add --local writes absolute local, does not clone, and links that path" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&ctx, .{
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .local = local,
-    }));
+    })));
 
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, local) != null);
@@ -296,10 +328,10 @@ test "add --branch and --local together errors and leaves YAML unchanged" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{
+    _ = try expect_result.failed(try add.run(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .branch = "feature",
@@ -313,14 +345,14 @@ test "add --from with --branch errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{
+    const why = try expect_result.failed(try add.run(&ctx, .{
         .from = "acme/skl-config:teams/platform.yaml",
         .branch = "feature",
     }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--branch") != null);
+    try testing.expect(std.mem.indexOf(u8, why.message(), "--branch") != null);
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 }
 
@@ -330,11 +362,14 @@ test "add --local without --ns when non-interactive errors --ns" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .local = local }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "--ns") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .local = local,
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "--ns") != null);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -343,10 +378,10 @@ test "add --local of a missing path leaves YAML unchanged" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{
+    _ = try expect_result.failed(try add.run(&ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .local = "/no/such/path",
@@ -422,12 +457,15 @@ test "add --ns loc is refused and changes nothing" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     scenario.git.calls.clearRetainingCapacity();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, add.run(&ctx, .{ .repo = "acme/skills", .namespace = "loc" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "reserved") != null);
+    const why = try expect_result.failed(try add.run(&ctx, .{
+        .repo = "acme/skills",
+        .namespace = "loc",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "reserved") != null);
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
     try testing.expectEqual(@as(usize, 0), scenario.git.calls.items.len);
 

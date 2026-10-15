@@ -3,3 +3,4 @@ zig-out/
 bin/
 tmp/
 .what-changed/
+zig-pkg/

@@ -120,3 +120,10 @@ test "extract returns empty when the file is empty" {
 
     try testing.expectEqualStrings("", try frontmatter.extract(arena.allocator(), ""));
 }
+
+test "isFenceLineAt is false for an index at or past the end of the text" {
+    try testing.expect(!frontmatter.isFenceLineAt("---", std.math.maxInt(usize)));
+    try testing.expect(!frontmatter.isFenceLineAt("---", 4));
+    try testing.expect(!frontmatter.isFenceLineAt("", 0));
+    try testing.expect(frontmatter.isFenceLineAt("---", 0));
+}

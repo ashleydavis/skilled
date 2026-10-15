@@ -12,6 +12,16 @@
     // Identifies the package to the build system. Generated once and never changed.
     .fingerprint = 0xd495bf31c2cabee4,
 
+    // Faultline fault tests this project (`zig build flt`). Pinned to one commit of its repository,
+    // so every machine and every CI run fault tests with the same Faultline. To use a working copy
+    // of Faultline instead, pass `--fork=<path to the copy>` to `zig build`.
+    .dependencies = .{
+        .faultline = .{
+            .url = "git+https://github.com/ashleydavis/faultline-zig#04d59eb4d0f4d219ba822f773f8ea80e275e61d8",
+            .hash = "faultline-0.0.0-WIokojKdEwCvt_Tu3KzEITN9itVnl9WrM-68EggKqZNK",
+        },
+    },
+
     // What goes into a package of this project. Everything else (build outputs, throwaway trees)
     // is deliberately left out.
     .paths = .{

@@ -4,24 +4,28 @@
 
 const std = @import("std");
 const add = @import("add.zig");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const init = @import("init.zig");
 const update = @import("update.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "update says a package is already up to date when HEAD does not move" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     scenario.clear();
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{})));
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "is already up to date") != null);
 }
 
@@ -30,14 +34,19 @@ test "update prints old SHA to new SHA when HEAD moves" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     scenario.git.next_head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     scenario.clear();
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{
+        .query = "acme/skills",
+    })));
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.head[0..7]) != null);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), scenario.git.next_head[0..7]) != null);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "is already up to date") == null);
@@ -48,14 +57,19 @@ test "update errors on a dirty tree" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     scenario.git.dirty = true;
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "dirty") != null);
+    const why = try expect_result.failed(try update.run(&ctx, .{
+        .query = "acme/skills",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "dirty") != null);
 }
 
 test "update without config errors" {
@@ -63,8 +77,8 @@ test "update without config errors" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{}));
-    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
+    const why = try expect_result.failed(try update.run(&ctx, .{}));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", why.message());
 }
 
 test "update --branch without query errors" {
@@ -72,13 +86,18 @@ test "update --branch without query errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{ .branch = "main" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "package") != null);
+    const why = try expect_result.failed(try update.run(&ctx, .{
+        .branch = "main",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "package") != null);
 }
 
 test "update --local without query errors" {
@@ -86,13 +105,18 @@ test "update --local without query errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{ .local = "/tmp/skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "package") != null);
+    const why = try expect_result.failed(try update.run(&ctx, .{
+        .local = "/tmp/skills",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "package") != null);
 }
 
 test "update --branch and --local together errors" {
@@ -100,12 +124,15 @@ test "update --branch and --local together errors" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{
+    _ = try expect_result.failed(try update.run(&ctx, .{
         .query = "demo",
         .branch = "main",
         .local = "/tmp/skills",
@@ -117,12 +144,18 @@ test "update --branch main writes branch in YAML" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "demo", .branch = "main" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{
+        .query = "demo",
+        .branch = "main",
+    })));
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "branch: main") != null);
 }
@@ -133,12 +166,18 @@ test "update --local writes local, clears branch, and retargets links" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "demo", .local = local }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{
+        .query = "demo",
+        .local = local,
+    })));
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "local:") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, local) != null);
@@ -156,14 +195,23 @@ test "update --branch after --local clears local and links the store" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
     const to_local = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&to_local, .{ .query = "demo", .local = local }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&to_local, .{
+        .query = "demo",
+        .local = local,
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "demo", .branch = "main" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{
+        .query = "demo",
+        .branch = "main",
+    })));
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "branch: main") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "local:") == null);
@@ -180,17 +228,19 @@ test "no-flag update of a local row does not fetch" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .local = local,
-    }));
+    })));
 
     scenario.git.calls.clearRetainingCapacity();
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{
+        .query = "demo",
+    })));
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "local tree") != null);
     for (scenario.git.calls.items) |call| {
         try testing.expect(!(call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], "fetch")));
@@ -202,16 +252,19 @@ test "update with no flags restores a deleted scratch link" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const links = try scratchLinks(scenario, scenario.cwd);
     try removeLink(scenario.io(), links[0]);
 
     scenario.clear();
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&ctx, .{})));
 
     try expectScratchSymlink(scenario.io(), links[0]);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "scratch") != null);
@@ -223,20 +276,33 @@ test "update --branch and --local leave the scratch links to install" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const links = try scratchLinks(scenario, scenario.cwd);
     try removeLink(scenario.io(), links[3]);
 
     const local_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&local_ctx, .{ .query = "demo", .local = local }));
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{ .follow_symlinks = false }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&local_ctx, .{
+        .query = "demo",
+        .local = local,
+    })));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{
+        .follow_symlinks = false,
+    }));
 
     const branch_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try update.run(&branch_ctx, .{ .query = "demo", .branch = "main" }));
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{ .follow_symlinks = false }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try update.run(&branch_ctx, .{
+        .query = "demo",
+        .branch = "main",
+    })));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), links[3], .{
+        .follow_symlinks = false,
+    }));
 }
 
 test "update of the scratch namespace names the scratch directory and does not fetch" {
@@ -244,14 +310,19 @@ test "update of the scratch namespace names the scratch directory and does not f
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     scenario.git.calls.clearRetainingCapacity();
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, update.run(&ctx, .{ .query = "loc" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
+    const why = try expect_result.failed(try update.run(&ctx, .{
+        .query = "loc",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "scratch directory") != null);
     for (scenario.git.calls.items) |call| {
         try testing.expect(!(call.argv.len >= 2 and std.mem.eql(u8, call.argv[1], "fetch")));
     }
@@ -286,6 +357,34 @@ fn removeLink(io: std.Io, path: []const u8) !void {
 // Asserts path exists as a symlink.
 //
 fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}
+
+test "replacePackage refuses an index past the end, an empty list included, and replaces the entry it names" {
+    const packages = [_]skilled.config.Package{
+        .{
+            .repo = "acme/skills",
+            .namespace = "demo",
+        },
+    };
+    const replacement: skilled.config.Package = .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+        .branch = "dev",
+    };
+
+    try testing.expectError(error.IndexNotFound, update.replacePackage(testing.failing_allocator, .{
+        .packages = &.{},
+    }, 0, replacement));
+    try testing.expectError(error.IndexNotFound, update.replacePackage(testing.failing_allocator, .{
+        .packages = @constCast(&packages),
+    }, 1, replacement));
+    const replaced = try update.replacePackage(testing.allocator, .{
+        .packages = @constCast(&packages),
+    }, 0, replacement);
+    defer testing.allocator.free(replaced.packages);
+    try testing.expectEqualStrings("dev", replaced.packages[0].branch.?);
 }

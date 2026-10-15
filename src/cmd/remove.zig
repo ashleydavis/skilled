@@ -14,6 +14,11 @@ const shared = @import("shared.zig");
 const commander = skilled.commander;
 
 //
+// How a refused command says why: the failure returned in place of the exit code.
+//
+const failure = skilled.failure;
+
+//
 // YAML rewrite after the entry is dropped.
 //
 const config = skilled.config;
@@ -51,39 +56,93 @@ pub const Args = struct {
 //
 // Unlinks the matched package and removes that one YAML row.
 //
-pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
+pub fn run(ctx: *const Context, args: Args) std.mem.Allocator.Error!failure.Result(u8) {
     const scope = try shared.scopeOf(ctx, args.global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
-    const matched = try shared.requireOneMatch(ctx.allocator, file.packages, args.query, ctx.fail);
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const matched = switch (try shared.requireOneMatch(ctx.allocator, file.packages, args.query)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    return removeMatched(ctx, scope, file, matched);
+}
 
-    const dest = shared.contentDir(ctx, matched.pkg) catch |err| switch (err) {
-        error.Failed => null,
-        error.OutOfMemory => return error.OutOfMemory,
+//
+// Unlinks `matched` and writes `file` back without its row. A match whose index is past the end
+// of `file` names no row and is refused.
+//
+fn removeMatched(
+    ctx: *const Context,
+    scope: skilled.paths.Scope,
+    file: config.File,
+    matched: shared.Match,
+) std.mem.Allocator.Error!failure.Result(u8) {
+    //
+    // A row whose directory cannot be worked out has no links of ours to remove, so its row is
+    // still dropped.
+    //
+    const dest: ?[]const u8 = switch (try shared.contentDir(ctx, matched.pkg)) {
+        .ok => |path| path,
+        .failed => null,
     };
     if (dest) |path| {
-        try link.unlinkPackage(ctx.io, ctx.allocator, path, matched.pkg.namespace, scope, ctx.fail);
+        switch (try link.unlinkPackage(ctx.io, ctx.allocator, path, matched.pkg.namespace, scope)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
 
-    const remaining = try dropIndex(ctx.allocator, file.packages, matched.index);
-    try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{ .packages = remaining }, ctx.fail);
-    try shared.line(ctx, "{s} Removed {s}.", .{ ctx.style.check(), try shared.identifier(ctx, matched.pkg.repo) });
-    return 0;
+    const remaining = dropIndex(ctx.allocator, file.packages, matched.index) catch |err| switch (err) {
+        error.IndexNotFound => return .{
+            .failed = failure.because("The package to remove is no longer in {s}.", .{scope.config_path}),
+        },
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, .{
+        .packages = remaining,
+    })) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (shared.line(ctx, "{s} Removed {s}.", .{ ctx.style.check(), try shared.identifier(ctx, matched.pkg.repo) })) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds the `remove` command.
 //
-pub fn buildCommand(ctx: *const Context) *Command {
-    return Command.init(ctx.allocator, "remove")
+pub fn buildCommand(ctx: *const Context) std.mem.Allocator.Error!*Command {
+    return (try Command.init(ctx.allocator, "remove"))
         .description("Unlink a package and drop its YAML entry.")
         .argument("<query>", "Repo string, owner/repo, name, or namespace.")
         .action(ctx, action);
 }
 
 //
-// Packages without the entry at index, in the original order.
+// Packages without the entry at index, in the original order. An index past the end names no entry
+// and is refused with `error.IndexNotFound`, before anything is allocated.
 //
-fn dropIndex(allocator: std.mem.Allocator, packages: []const config.Package, index: usize) std.mem.Allocator.Error![]config.Package {
+pub fn dropIndex(allocator: std.mem.Allocator, packages: []const config.Package, index: usize) (error{IndexNotFound} || std.mem.Allocator.Error)![]config.Package {
+    if (index >= packages.len) {
+        return error.IndexNotFound;
+    }
     const remaining = try allocator.alloc(config.Package, packages.len - 1);
     var out: usize = 0;
     for (packages, 0..) |pkg, i| {
@@ -99,12 +158,14 @@ fn dropIndex(allocator: std.mem.Allocator, packages: []const config.Package, ind
 //
 // Unpacks Commander options and runs remove.
 //
-fn action(invocation: *commander.Invocation) anyerror!void {
+fn action(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
     if (invocation.args.len == 0) {
-        return ctx.fail.set("The remove command requires a query.", .{});
+        return .{
+            .failed = failure.because("The remove command requires a query.", .{}),
+        };
     }
-    invocation.exit_code = try run(ctx, .{
+    return run(ctx, .{
         .global = invocation.option("global") != null,
         .query = invocation.args[0],
     });

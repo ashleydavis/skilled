@@ -33,11 +33,6 @@ const scratch = @import("scratch.zig");
 const yaml = @import("yaml.zig");
 
 //
-// Alias so parse signatures read as Failure rather than failure.Failure.
-//
-const Failure = failure.Failure;
-
-//
 // Alias so the YAML tree is named Value at the point of use.
 //
 const Value = value.Value;
@@ -94,34 +89,53 @@ pub const File = struct {
 };
 
 //
-// Turns YAML text into a File, or records why the document is not a valid skl.yaml.
+// Turns YAML text into a File, or the failure that says why the document is not a valid skl.yaml.
 //
 // Namespace uniqueness is per file: the second entry that repeats a namespace is the one that
 // fails. Repo strings are kept as written; clone-spec parsing is a later step.
 //
-pub fn parse(allocator: std.mem.Allocator, text: []const u8, fail: *Failure) failure.Error!File {
-    const parsed = try yaml.parseOrFail(allocator, text, "skl.yaml", fail);
+pub fn parse(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error!failure.Result(File) {
+    const parsed = switch (try yaml.parseOrFail(allocator, text, "skl.yaml")) {
+        .ok => |read| read,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     if (!value.isPlainObject(parsed)) {
-        return fail.set("The file skl.yaml must be a YAML object, got {s}.", .{
-            try value.describe(allocator, parsed),
-        });
+        return .{
+            .failed = failure.because("The file skl.yaml must be a YAML object, got {s}.", .{
+                try value.describe(allocator, parsed),
+            }),
+        };
     }
 
     const raw_packages = value.get(parsed, "packages");
     const packages_array = switch (raw_packages orelse Value.null) {
         .array => |array| array,
-        else => return fail.set("The skl.yaml field \"packages\" must be an array, got {s}.", .{
-            try value.describe(allocator, raw_packages),
-        }),
+        else => return .{
+            .failed = failure.because("The skl.yaml field \"packages\" must be an array, got {s}.", .{
+                try value.describe(allocator, raw_packages),
+            }),
+        },
     };
 
     var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
     var packages: std.ArrayList(Package) = .empty;
     for (packages_array.items) |raw_package| {
-        try packages.append(allocator, try parsePackage(allocator, raw_package, &seen, fail));
+        const pkg = switch (try parsePackage(allocator, raw_package, &seen)) {
+            .ok => |read| read,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
+        try packages.append(allocator, pkg);
     }
 
-    return .{ .packages = try packages.toOwnedSlice(allocator) };
+    return .{
+        .ok = .{
+            .packages = try packages.toOwnedSlice(allocator),
+        },
+    };
 }
 
 //
@@ -141,12 +155,18 @@ pub fn stringify(allocator: std.mem.Allocator, file: File) std.mem.Allocator.Err
         if (pkg.local) |local| {
             try object.put(allocator, "local", value.str(local));
         }
-        try packages.append(.{ .object = object });
+        try packages.append(.{
+            .object = object,
+        });
     }
 
     var root: value.Object = .empty;
-    try root.put(allocator, "packages", .{ .array = packages });
-    const body = try yaml.stringify(allocator, .{ .object = root });
+    try root.put(allocator, "packages", .{
+        .array = packages,
+    });
+    const body = try yaml.stringify(allocator, .{
+        .object = root,
+    });
     defer allocator.free(body);
     return std.mem.concat(allocator, u8, &.{ body, "\n" });
 }
@@ -154,25 +174,32 @@ pub fn stringify(allocator: std.mem.Allocator, file: File) std.mem.Allocator.Err
 //
 // Reads path, bounded by files.MAX_FILE_BYTES, and parses it as skl.yaml.
 //
-pub fn readFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8, fail: *Failure) failure.Error!File {
+pub fn readFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) std.mem.Allocator.Error!failure.Result(File) {
     const text = files.readFile(io, allocator, path) catch |err| {
-        return fail.set("Cannot read {s}: {s}.", .{ path, files.describeError(err) });
+        return .{
+            .failed = failure.because("Cannot read {s}: {s}.", .{ path, files.describeError(err) }),
+        };
     };
-    return parse(allocator, text, fail);
+    return parse(allocator, text);
 }
 
 //
 // Writes file as YAML at path, creating any missing parent directories.
 //
-pub fn writeFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8, file: File, fail: *Failure) failure.Error!void {
+pub fn writeFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8, file: File) std.mem.Allocator.Error!failure.Result(void) {
     const text = try stringify(allocator, file);
     defer allocator.free(text);
     files.makeParentDir(io, path) catch |err| {
-        return fail.set("Cannot write {s}: {s}.", .{ path, files.describeError(err) });
+        return .{
+            .failed = failure.because("Cannot write {s}: {s}.", .{ path, files.describeError(err) }),
+        };
     };
     files.writeFile(io, path, text) catch |err| {
-        return fail.set("Cannot write {s}: {s}.", .{ path, files.describeError(err) });
+        return .{
+            .failed = failure.because("Cannot write {s}: {s}.", .{ path, files.describeError(err) }),
+        };
     };
+    return .ok;
 }
 
 //
@@ -182,69 +209,116 @@ fn parsePackage(
     allocator: std.mem.Allocator,
     raw_package: Value,
     seen: *std.StringArrayHashMapUnmanaged(void),
-    fail: *Failure,
-) failure.Error!Package {
+) std.mem.Allocator.Error!failure.Result(Package) {
     if (!value.isPlainObject(raw_package)) {
-        return fail.set("A skl.yaml package must be an object, got {s}.", .{
-            try value.describe(allocator, raw_package),
-        });
+        return .{
+            .failed = failure.because("A skl.yaml package must be an object, got {s}.", .{
+                try value.describe(allocator, raw_package),
+            }),
+        };
     }
 
-    const repo = try readRequiredString(allocator, raw_package, "repo", fail);
-    const namespace = try readRequiredString(allocator, raw_package, "namespace", fail);
-    const branch = try readOptionalString(allocator, raw_package, "branch", fail);
-    const local = try readOptionalString(allocator, raw_package, "local", fail);
+    const repo = switch (try readRequiredString(allocator, raw_package, "repo")) {
+        .ok => |read| read,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const namespace = switch (try readRequiredString(allocator, raw_package, "namespace")) {
+        .ok => |read| read,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const branch = switch (try readOptionalString(allocator, raw_package, "branch")) {
+        .ok => |read| read,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    const local = switch (try readOptionalString(allocator, raw_package, "local")) {
+        .ok => |read| read,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     if (branch != null and local != null) {
-        return fail.set("A skl.yaml package cannot have both \"branch\" and \"local\".", .{});
+        return .{
+            .failed = failure.because("A skl.yaml package cannot have both \"branch\" and \"local\".", .{}),
+        };
     }
     if (scratch.isReserved(namespace)) {
-        return fail.set(
-            "The skl.yaml namespace \"{s}\" is reserved for the scratch directory.",
-            .{namespace},
-        );
+        return .{
+            .failed = failure.because(
+                "The skl.yaml namespace \"{s}\" is reserved for the scratch directory.",
+                .{namespace},
+            ),
+        };
     }
     if (seen.contains(namespace)) {
-        return fail.set("The skl.yaml file has a duplicate namespace \"{s}\".", .{namespace});
+        return .{
+            .failed = failure.because("The skl.yaml file has a duplicate namespace \"{s}\".", .{namespace}),
+        };
     }
     try seen.put(allocator, namespace, {});
-    return .{ .repo = repo, .namespace = namespace, .branch = branch, .local = local };
+    return .{
+        .ok = .{
+            .repo = repo,
+            .namespace = namespace,
+            .branch = branch,
+            .local = local,
+        },
+    };
 }
 
 //
-// A required string field on a package object. Absent, null, or a non-string is an error.
+// A required string field on a package object. Absent, null, or a non-string is refused.
 //
-fn readRequiredString(allocator: std.mem.Allocator, object: Value, field: []const u8, fail: *Failure) failure.Error![]const u8 {
+fn readRequiredString(allocator: std.mem.Allocator, object: Value, field: []const u8) std.mem.Allocator.Error!failure.Result([]const u8) {
     const raw = value.get(object, field);
-    switch (raw orelse Value.null) {
-        .string => |text| {
-            if (text.len > 0) {
-                return text;
-            }
-        },
-        else => {},
+    const text: []const u8 = switch (raw orelse Value.null) {
+        .string => |string| string,
+        else => "",
+    };
+    if (text.len == 0) {
+        return .{
+            .failed = failure.because("The skl.yaml package field \"{s}\" must be a non-empty string, got {s}.", .{
+                field,
+                try value.describe(allocator, raw),
+            }),
+        };
     }
-    return fail.set("The skl.yaml package field \"{s}\" must be a non-empty string, got {s}.", .{
-        field, try value.describe(allocator, raw),
-    });
+    return .{
+        .ok = text,
+    };
 }
 
 //
-// Optional string field: absent or YAML null is unset; empty or a non-string is an error.
+// Optional string field: absent or YAML null is unset; empty or a non-string is refused.
 //
-fn readOptionalString(allocator: std.mem.Allocator, object: Value, field: []const u8, fail: *Failure) failure.Error!?[]const u8 {
-    const raw = value.get(object, field) orelse return null;
+fn readOptionalString(allocator: std.mem.Allocator, object: Value, field: []const u8) std.mem.Allocator.Error!failure.Result(?[]const u8) {
+    const raw = value.get(object, field) orelse return .{
+        .ok = null,
+    };
     switch (raw) {
-        .null => return null,
+        .null => return .{
+            .ok = null,
+        },
         .string => |text| {
             if (text.len > 0) {
-                return text;
+                return .{
+                    .ok = text,
+                };
             }
         },
         else => {},
     }
-    return fail.set("The skl.yaml package field \"{s}\" must be a non-empty string, got {s}.", .{
-        field, try value.describe(allocator, raw),
-    });
+    return .{
+        .failed = failure.because("The skl.yaml package field \"{s}\" must be a non-empty string, got {s}.", .{
+            field,
+            try value.describe(allocator, raw),
+        }),
+    };
 }
 
 test {

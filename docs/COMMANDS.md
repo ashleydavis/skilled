@@ -31,6 +31,8 @@ Bare `skl` prints help and exits 0.
 
 If there is no `skl.yaml` in the active scope, commands other than `init` exit non-zero and tell you to run `skl init`.
 
+If `skl` runs out of memory it prints `skl ran out of memory and stopped.` and exits 137, the code a shell reports for a process the system ended for using too much memory. Every other failure exits 1.
+
 ## Scratch directory
 
 `./.skilled/scratch` (project) or `~/.skilled/scratch` (`-g`) holds `skills/` and `commands/` trees linked into both agents under the reserved namespace `loc`:

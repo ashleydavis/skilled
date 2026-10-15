@@ -4,23 +4,29 @@
 
 const std = @import("std");
 const add = @import("add.zig");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const init = @import("init.zig");
 const remove = @import("remove.zig");
 const skilled = @import("skilled");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "remove unlinks and drops the YAML entry, leaving the store clone" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&ctx, .{
+        .query = "acme/skills",
+    })));
 
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 
@@ -30,7 +36,9 @@ test "remove unlinks and drops the YAML entry, leaving the store clone" {
     try testing.expect(skilled.files.fileExists(scenario.io(), dest));
 
     const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{
+        .follow_symlinks = false,
+    }));
 }
 
 test "remove matches by repo name, SSH URL, and namespace" {
@@ -47,13 +55,17 @@ test "remove matches by repo name, SSH URL, and namespace" {
     );
 
     const by_name = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&by_name, .{ .query = "skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&by_name, .{
+        .query = "skills",
+    })));
     var yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") == null);
     try testing.expect(std.mem.indexOf(u8, yaml, "cmds") != null);
 
     const by_ssh = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&by_ssh, .{ .query = "git@github.example.com:acme/cmds.git" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&by_ssh, .{
+        .query = "git@github.example.com:acme/cmds.git",
+    })));
     yaml = try scenario.readProjectYaml();
     try testing.expectEqualStrings("packages: []\n", yaml);
 }
@@ -70,7 +82,9 @@ test "remove matches by namespace" {
     );
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&ctx, .{
+        .query = "demo",
+    })));
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 }
 
@@ -88,8 +102,10 @@ test "remove errors on an ambiguous match" {
     );
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "skills" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "Ambiguous") != null);
+    const why = try expect_result.failed(try remove.run(&ctx, .{
+        .query = "skills",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "Ambiguous") != null);
     const yaml = try scenario.readProjectYaml();
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/skills") != null);
     try testing.expect(std.mem.indexOf(u8, yaml, "acme/other") != null);
@@ -107,7 +123,9 @@ test "remove nosuch exits non-zero" {
     );
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "nosuch" }));
+    _ = try expect_result.failed(try remove.run(&ctx, .{
+        .query = "nosuch",
+    }));
 }
 
 test "remove without config errors" {
@@ -115,8 +133,10 @@ test "remove without config errors" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
+    const why = try expect_result.failed(try remove.run(&ctx, .{
+        .query = "acme/skills",
+    }));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", why.message());
 }
 
 test "remove of a local package unlinks the namespace and drops YAML" {
@@ -125,20 +145,24 @@ test "remove of a local package unlinks the namespace and drops YAML" {
 
     const local = try scenario.writeLocalPackage("local-skills", "Local hello");
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .local = local,
-    }));
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&ctx, .{
+        .query = "demo",
+    })));
     try testing.expectEqualStrings("packages: []\n", try scenario.readProjectYaml());
 
     const link_path = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{ .follow_symlinks = false }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), link_path, .{
+        .follow_symlinks = false,
+    }));
 }
 
 test "remove of the scratch namespace is refused and the links survive" {
@@ -146,11 +170,13 @@ test "remove of the scratch namespace is refused and the links survive" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, remove.run(&ctx, .{ .query = "loc" }));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "scratch directory") != null);
+    const why = try expect_result.failed(try remove.run(&ctx, .{
+        .query = "loc",
+    }));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "scratch directory") != null);
 
     for (try scratchLinks(scenario, scenario.cwd)) |path| {
         try expectScratchSymlink(scenario.io(), path);
@@ -162,15 +188,22 @@ test "remove of a package leaves the scratch links alone" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try remove.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try remove.run(&ctx, .{
+        .query = "demo",
+    })));
 
     const demo_link = try skilled.files.joinPath(scenario.allocator(), &.{ scenario.cwd, ".cursor", "skills", "demo" });
-    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), demo_link, .{ .follow_symlinks = false }));
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(scenario.io(), demo_link, .{
+        .follow_symlinks = false,
+    }));
     for (try scratchLinks(scenario, scenario.cwd)) |path| {
         try expectScratchSymlink(scenario.io(), path);
     }
@@ -195,6 +228,23 @@ fn scratchLinks(scenario: *harness.Scenario, base: []const u8) ![4][]const u8 {
 // Asserts path exists as a symlink.
 //
 fn expectScratchSymlink(io: std.Io, path: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
+}
+
+test "dropIndex refuses an index past the end, an empty list included, and drops the entry it names" {
+    const packages = [_]skilled.config.Package{
+        .{
+            .repo = "acme/skills",
+            .namespace = "demo",
+        },
+    };
+
+    try testing.expectError(error.IndexNotFound, remove.dropIndex(testing.failing_allocator, &.{}, 0));
+    try testing.expectError(error.IndexNotFound, remove.dropIndex(testing.failing_allocator, &packages, 1));
+    const dropped = try remove.dropIndex(testing.allocator, &packages, 0);
+    defer testing.allocator.free(dropped);
+    try testing.expectEqual(@as(usize, 0), dropped.len);
 }

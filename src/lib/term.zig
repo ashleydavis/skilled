@@ -2,7 +2,7 @@
 // Whether this run should use color, icons, and interactive prompts.
 //
 // Color and prompts are decided from argv, the environment, and whether the matching stream is a
-// TTY, so a test can pass fake args and a map rather than owning a real terminal. The CLI computes
+// TTY. The CLI computes
 // these once and hands the result down; nothing here looks at the process on its own.
 //
 
@@ -132,7 +132,10 @@ pub fn detectStyle(args: []const []const u8, env: *const std.process.Environ.Map
         !argsContain(args, "--no-color") and
         env.get("NO_COLOR") == null and
         !std.mem.eql(u8, env.get("SKL_NO_COLOR") orelse "", "1");
-    return .{ .color = color, .icons = color };
+    return .{
+        .color = color,
+        .icons = color,
+    };
 }
 
 //

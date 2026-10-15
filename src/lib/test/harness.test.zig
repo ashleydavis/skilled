@@ -22,9 +22,19 @@ const Context = context_mod.Context;
 const config = skilled.config;
 
 //
-// TemporaryDir and TestIo, so each scenario has its own disk and Io.
+// The filesystem operations the scenario uses to lay out its project, home and fake clones.
 //
 const files = skilled.files;
+
+//
+// Each scenario's own disk, so no two tests see each other's files.
+//
+const TemporaryDir = @import("test_disk").TemporaryDir;
+
+//
+// Each scenario's own Io, so nothing one test does to its Io reaches another.
+//
+const TestIo = @import("test_disk").TestIo;
 
 //
 // The runner interface FakeGit implements.
@@ -32,9 +42,14 @@ const files = skilled.files;
 const git = skilled.git;
 
 //
-// How a refused command is described; the scenario holds one Failure for the command under test.
+// How a scripted git or browser says why it refused, returned the way the real runners return it.
 //
-const Failure = skilled.failure.Failure;
+const failure = skilled.failure;
+
+//
+// Reads the value out of a returned Result, failing the test on a refusal.
+//
+const expect_result = @import("expect_result");
 
 //
 // One recorded git argv, so tests can assert clone happened or did not.
@@ -191,7 +206,12 @@ pub const FakeGit = struct {
     // The GitRunner clone/fetch/headSha take.
     //
     pub fn runner(self: *FakeGit) git.GitRunner {
-        return git.customRunner(@ptrCast(self), runGit);
+        return .{
+            .function = .{
+                .ctx = @ptrCast(self),
+                .runFn = runGit,
+            },
+        };
     }
 };
 
@@ -218,7 +238,12 @@ pub const FakeBrowser = struct {
     // The BrowserRunner docs takes.
     //
     pub fn runner(self: *FakeBrowser) context_mod.BrowserRunner {
-        return .{ .custom = .{ .ctx = @ptrCast(self), .runFn = runBrowser } };
+        return .{
+            .function = .{
+                .ctx = @ptrCast(self),
+                .runFn = runBrowser,
+            },
+        };
     }
 };
 
@@ -234,12 +259,12 @@ pub const Scenario = struct {
     //
     // The Io this scenario's filesystem calls go through.
     //
-    test_io: files.TestIo,
+    test_io: TestIo,
 
     //
     // Thrown away when the test ends. Home, cwd, and store live inside it.
     //
-    temporary: files.TemporaryDir,
+    temporary: TemporaryDir,
 
     //
     // Private environment. HOME is set to this scenario's home directory.
@@ -265,11 +290,6 @@ pub const Scenario = struct {
     // The Reader context() points at. Replaced each context() so seek starts at 0.
     //
     stdin_reader: std.Io.Reader = undefined,
-
-    //
-    // Failure the command under test writes into.
-    //
-    fail: Failure,
 
     //
     // Fake git for this scenario.
@@ -303,13 +323,12 @@ pub const Scenario = struct {
             .environ = undefined,
             .stdout = undefined,
             .stderr = undefined,
-            .fail = undefined,
             .git = undefined,
             .browser = undefined,
             .home = undefined,
             .cwd = undefined,
         };
-        scenario.temporary = try files.TemporaryDir.create(scenario.test_io.io());
+        scenario.temporary = try TemporaryDir.create(scenario.test_io.io());
         const alloc = scenario.arena.allocator();
         scenario.environ = std.process.Environ.Map.init(alloc);
         scenario.home = try scenario.temporary.join(alloc, "home");
@@ -324,12 +343,13 @@ pub const Scenario = struct {
         try scenario.environ.put("TEMP", tmp);
         scenario.stdout = std.Io.Writer.Allocating.init(alloc);
         scenario.stderr = std.Io.Writer.Allocating.init(alloc);
-        scenario.fail = Failure.init(alloc);
         scenario.git = .{
             .allocator = alloc,
             .io = scenario.test_io.io(),
         };
-        scenario.browser = .{ .allocator = alloc };
+        scenario.browser = .{
+            .allocator = alloc,
+        };
         return scenario;
     }
 
@@ -369,8 +389,8 @@ pub const Scenario = struct {
     //
     pub fn writeProjectYaml(self: *Scenario, text: []const u8) !void {
         const path = try files.joinPath(self.allocator(), &.{ self.cwd, "skl.yaml" });
-        const file = try config.parse(self.allocator(), text, &self.fail);
-        try config.writeFile(self.io(), self.allocator(), path, file, &self.fail);
+        const file = try expect_result.ok(try config.parse(self.allocator(), text));
+        try expect_result.ok(try config.writeFile(self.io(), self.allocator(), path, file));
     }
 
     //
@@ -378,8 +398,8 @@ pub const Scenario = struct {
     //
     pub fn writeGlobalYaml(self: *Scenario, text: []const u8) !void {
         const path = try files.joinPath(self.allocator(), &.{ self.home, ".config", "skilled", "skl.yaml" });
-        const file = try config.parse(self.allocator(), text, &self.fail);
-        try config.writeFile(self.io(), self.allocator(), path, file, &self.fail);
+        const file = try expect_result.ok(try config.parse(self.allocator(), text));
+        try expect_result.ok(try config.writeFile(self.io(), self.allocator(), path, file));
     }
 
     //
@@ -394,23 +414,11 @@ pub const Scenario = struct {
     //
     pub fn contextInteractive(self: *Scenario, non_interactive: bool) Context {
         self.stdin_reader = std.Io.Reader.fixed(self.stdin_bytes);
-        self.fail = Failure.init(self.allocator());
-        return .{
-            .allocator = self.allocator(),
-            .io = self.io(),
-            .environ = &self.environ,
-            .cwd = self.cwd,
-            .home = self.home,
-            .style = .{ .color = false, .icons = false },
-            .non_interactive = non_interactive,
-            .stderr_is_tty = false,
-            .git = self.git.runner(),
-            .browser = self.browser.runner(),
-            .stdin = &self.stdin_reader,
-            .stdout = &self.stdout.writer,
-            .stderr = &self.stderr.writer,
-            .fail = &self.fail,
-        };
+        var ctx: Context = .init(self.allocator(), self.io(), &self.environ, self.cwd, self.home, &self.stdin_reader, &self.stdout.writer, &self.stderr.writer);
+        ctx.non_interactive = non_interactive;
+        ctx.git = self.git.runner();
+        ctx.browser = self.browser.runner();
+        return ctx;
     }
 
     //
@@ -484,8 +492,7 @@ fn runGit(
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
     cwd: ?[]const u8,
-    fail: *Failure,
-) git.RunError!git.Result {
+) git.RunError!failure.Result(git.Result) {
     _ = environ;
     const self: *FakeGit = @ptrCast(@alignCast(ctx));
     try self.calls.append(self.allocator, .{
@@ -496,16 +503,18 @@ fn runGit(
         return error.FileNotFound;
     }
     if (argv.len < 2) {
-        return fail.set("scripted git: argv too short", .{});
+        return .{
+            .failed = failure.because("scripted git: argv too short", .{}),
+        };
     }
     if (std.mem.eql(u8, argv[1], "clone")) {
         if (branchFromClone(argv)) |name| {
             self.branch = try self.allocator.dupe(u8, name);
         }
-        return cloneReply(self, io, allocator, argv, fail);
+        return cloneReply(self, io, allocator, argv);
     }
     if (std.mem.eql(u8, argv[1], "rev-parse")) {
-        return revParseReply(self, allocator, argv, fail);
+        return revParseReply(self, allocator, argv);
     }
     if (std.mem.eql(u8, argv[1], "status")) {
         return statusReply(self, allocator);
@@ -517,9 +526,11 @@ fn runGit(
     if (std.mem.eql(u8, argv[1], "merge")) {
         if (self.diverged) {
             return .{
-                .stdout = try allocator.dupe(u8, ""),
-                .stderr = try allocator.dupe(u8, "fatal: Not possible to fast-forward"),
-                .exit_code = 1,
+                .ok = .{
+                    .stdout = try allocator.dupe(u8, ""),
+                    .stderr = try allocator.dupe(u8, "fatal: Not possible to fast-forward"),
+                    .exit_code = 1,
+                },
             };
         }
         return ok(allocator);
@@ -527,17 +538,21 @@ fn runGit(
     if (std.mem.eql(u8, argv[1], "show")) {
         return showReply(self, allocator);
     }
-    return fail.set("scripted git: unexpected {s}", .{argv[1]});
+    return .{
+        .failed = failure.because("scripted git: unexpected {s}", .{argv[1]}),
+    };
 }
 
 //
 // YAML bytes for `--from`, or a non-zero exit when the scripted file is missing.
 //
-fn showReply(self: *FakeGit, allocator: std.mem.Allocator) git.RunError!git.Result {
+fn showReply(self: *FakeGit, allocator: std.mem.Allocator) git.RunError!failure.Result(git.Result) {
     return .{
-        .stdout = try allocator.dupe(u8, self.show_text),
-        .stderr = try allocator.dupe(u8, self.show_stderr),
-        .exit_code = self.show_exit_code,
+        .ok = .{
+            .stdout = try allocator.dupe(u8, self.show_text),
+            .stderr = try allocator.dupe(u8, self.show_stderr),
+            .exit_code = self.show_exit_code,
+        },
     };
 }
 
@@ -549,19 +564,24 @@ fn cloneReply(
     io: std.Io,
     allocator: std.mem.Allocator,
     argv: []const []const u8,
-    fail: *Failure,
-) git.RunError!git.Result {
+) git.RunError!failure.Result(git.Result) {
     if (argv.len < 5) {
-        return fail.set("scripted git clone: missing dest", .{});
+        return .{
+            .failed = failure.because("scripted git clone: missing dest", .{}),
+        };
     }
     const dest = argv[argv.len - 1];
     const repo = repoFromDest(dest);
     if (nameIs(self.fail_repo, repo)) {
-        return fail.set("scripted git clone failed for {s}", .{repo});
+        return .{
+            .failed = failure.because("scripted git clone failed for {s}", .{repo}),
+        };
     }
     const layout = layoutFor(self, repo);
     materialize(io, allocator, dest, layout) catch |err| {
-        return fail.set("scripted git clone could not write {s}: {s}", .{ dest, @errorName(err) });
+        return .{
+            .failed = failure.because("scripted git clone could not write {s}: {s}", .{ dest, @errorName(err) }),
+        };
     };
     return ok(allocator);
 }
@@ -573,51 +593,62 @@ fn revParseReply(
     self: *FakeGit,
     allocator: std.mem.Allocator,
     argv: []const []const u8,
-    fail: *Failure,
-) git.RunError!git.Result {
+) git.RunError!failure.Result(git.Result) {
     if (argvHas(argv, "HEAD") and !argvHas(argv, "--abbrev-ref")) {
         const sha = if (self.fetched) self.next_head else self.head;
         return .{
-            .stdout = try allocator.dupe(u8, sha),
-            .stderr = try allocator.dupe(u8, ""),
-            .exit_code = 0,
+            .ok = .{
+                .stdout = try allocator.dupe(u8, sha),
+                .stderr = try allocator.dupe(u8, ""),
+                .exit_code = 0,
+            },
         };
     }
     if (argvHas(argv, "--abbrev-ref") and argvHas(argv, "HEAD")) {
         const name: []const u8 = if (self.detached) "HEAD" else self.branch;
         return .{
-            .stdout = try allocator.dupe(u8, name),
-            .stderr = try allocator.dupe(u8, ""),
-            .exit_code = 0,
+            .ok = .{
+                .stdout = try allocator.dupe(u8, name),
+                .stderr = try allocator.dupe(u8, ""),
+                .exit_code = 0,
+            },
         };
     }
     if (argvHas(argv, "@{upstream}")) {
         if (self.no_upstream) {
             return .{
-                .stdout = try allocator.dupe(u8, ""),
-                .stderr = try allocator.dupe(u8, "fatal: no upstream"),
-                .exit_code = 1,
+                .ok = .{
+                    .stdout = try allocator.dupe(u8, ""),
+                    .stderr = try allocator.dupe(u8, "fatal: no upstream"),
+                    .exit_code = 1,
+                },
             };
         }
         const upstream = try std.fmt.allocPrint(allocator, "origin/{s}", .{self.branch});
         return .{
-            .stdout = try allocator.dupe(u8, upstream),
-            .stderr = try allocator.dupe(u8, ""),
-            .exit_code = 0,
+            .ok = .{
+                .stdout = try allocator.dupe(u8, upstream),
+                .stderr = try allocator.dupe(u8, ""),
+                .exit_code = 0,
+            },
         };
     }
-    return fail.set("scripted git rev-parse: unexpected argv", .{});
+    return .{
+        .failed = failure.because("scripted git rev-parse: unexpected argv", .{}),
+    };
 }
 
 //
 // Porcelain status: dirty when the flag is set.
 //
-fn statusReply(self: *FakeGit, allocator: std.mem.Allocator) git.RunError!git.Result {
+fn statusReply(self: *FakeGit, allocator: std.mem.Allocator) git.RunError!failure.Result(git.Result) {
     const text: []const u8 = if (self.dirty) " M README.md\n" else "";
     return .{
-        .stdout = try allocator.dupe(u8, text),
-        .stderr = try allocator.dupe(u8, ""),
-        .exit_code = 0,
+        .ok = .{
+            .stdout = try allocator.dupe(u8, text),
+            .stderr = try allocator.dupe(u8, ""),
+            .exit_code = 0,
+        },
     };
 }
 
@@ -702,25 +733,26 @@ fn runBrowser(
     allocator: std.mem.Allocator,
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
-    fail: *Failure,
-) skilled.failure.Error!void {
+) std.mem.Allocator.Error!failure.Result(void) {
     _ = io;
     _ = allocator;
     _ = environ;
-    _ = fail;
     const self: *FakeBrowser = @ptrCast(@alignCast(ctx));
     self.argv = try copyArgv(self.allocator, argv);
     self.opens += 1;
+    return .ok;
 }
 
 //
 // Empty successful git result.
 //
-fn ok(allocator: std.mem.Allocator) git.RunError!git.Result {
+fn ok(allocator: std.mem.Allocator) git.RunError!failure.Result(git.Result) {
     return .{
-        .stdout = try allocator.dupe(u8, ""),
-        .stderr = try allocator.dupe(u8, ""),
-        .exit_code = 0,
+        .ok = .{
+            .stdout = try allocator.dupe(u8, ""),
+            .stderr = try allocator.dupe(u8, ""),
+            .exit_code = 0,
+        },
     };
 }
 

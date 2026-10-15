@@ -1533,8 +1533,8 @@ sc75() {
 #
 # The driver.
 #
-# Scenarios are independent, so they run in lanes: --jobs lanes pull from one shared queue, and a
-# lane takes the next scenario the instant it finishes the last one. Nothing waits for a batch to
+# Scenarios are independent, so they run in lanes: --jobs lanes share one list of scenarios, and a
+# lane takes the next unclaimed scenario the instant it finishes the last one. Nothing waits for a batch to
 # drain, so a slow scenario never leaves the other lanes idle.
 #
 # Each scenario writes into its own log and its own status file. The main shell prints those logs
@@ -1670,40 +1670,29 @@ run_one() {
     printf '%s' "$status" >"$LOG_DIR/$slot.status"
 }
 
-QUEUE="$FIXTURES/queue"
 LANES=()
 
-if [ "$JOBS" -gt 1 ] && mkfifo "$QUEUE" 2>/dev/null; then
-    #
-    # The queue holds one line per scenario. A lane blocks on read until a line is there, so the
-    # lanes share the work greedily rather than being handed a fixed slice of it. bash reads a
-    # pipe one byte at a time, so two lanes cannot tear one line between them.
-    #
-    seq 0 "$((TOTAL - 1))" >"$QUEUE" &
-    QUEUE_WRITER=$!
-    exec 3<"$QUEUE"
-
-    lane=0
-    while [ "$lane" -lt "$JOBS" ]; do
-        (
-            while IFS= read -r queued_index <&3; do
-                run_one "$queued_index"
-            done
-        ) &
-        LANES+=("$!")
-        lane=$((lane + 1))
-    done
-else
-    QUEUE_WRITER=""
-    (
-        index=0
-        while [ "$index" -lt "$TOTAL" ]; do
+#
+# One lane: walks every scenario in order and runs each one it is first to claim. A claim is a
+# directory, because mkdir is atomic: when two lanes try the same scenario, exactly one mkdir
+# succeeds. Lanes share the work greedily, so a slow scenario never leaves the others idle.
+#
+run_lane() {
+    local index=0
+    while [ "$index" -lt "$TOTAL" ]; do
+        if mkdir "$LOG_DIR/$(printf '%03d' "$index").claim" 2>/dev/null; then
             run_one "$index"
-            index=$((index + 1))
-        done
-    ) &
+        fi
+        index=$((index + 1))
+    done
+}
+
+lane=0
+while [ "$lane" -lt "$JOBS" ]; do
+    run_lane &
     LANES+=("$!")
-fi
+    lane=$((lane + 1))
+done
 
 #
 # Print in scenario order while the lanes are still working: wait for each scenario's status file,
@@ -1726,10 +1715,6 @@ done
 for lane_pid in "${LANES[@]}"; do
     wait "$lane_pid" || true
 done
-if [ "$JOBS" -gt 1 ] && [ -n "$QUEUE_WRITER" ]; then
-    exec 3<&-
-    wait "$QUEUE_WRITER" || true
-fi
 
 echo ""
 if [ "${#FAILED[@]}" -ne 0 ]; then

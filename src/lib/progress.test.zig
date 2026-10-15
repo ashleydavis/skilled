@@ -10,12 +10,18 @@ const testing = std.testing;
 //
 // A style with color on, so an enabled progress line can be built without going through detectStyle.
 //
-const style_on = term.Style{ .color = true, .icons = true };
+const style_on = term.Style{
+    .color = true,
+    .icons = true,
+};
 
 //
 // A style with color off. Progress must be a no-op against this even on a TTY.
 //
-const style_off = term.Style{ .color = false, .icons = false };
+const style_off = term.Style{
+    .color = false,
+    .icons = false,
+};
 
 test "Progress is a no-op when style is disabled" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);

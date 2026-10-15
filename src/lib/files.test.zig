@@ -4,6 +4,8 @@
 
 const std = @import("std");
 const files = @import("files.zig");
+const TemporaryDir = @import("test_disk").TemporaryDir;
+const TestIo = @import("test_disk").TestIo;
 const testing = std.testing;
 
 test "absolutePath returns an already-absolute path unchanged" {
@@ -54,16 +56,16 @@ test "each TestIo is its own implementation" {
     // The point of a test making its own: two of them are two separate implementations, so nothing
     // one test does to its `Io` can be seen by another.
     //
-    var first = files.TestIo.init();
+    var first = TestIo.init();
     defer first.deinit();
-    var second = files.TestIo.init();
+    var second = TestIo.init();
     defer second.deinit();
 
     try testing.expect(first.io().userdata != second.io().userdata);
 }
 
 test "readFile and writeFile round trip a file" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -71,7 +73,7 @@ test "readFile and writeFile round trip a file" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     const path = try temporary.join(allocator, "nested/file.txt");
@@ -81,7 +83,7 @@ test "readFile and writeFile round trip a file" {
 }
 
 test "fileExists answers for a file that is there and one that is not" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -89,7 +91,7 @@ test "fileExists answers for a file that is there and one that is not" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     try temporary.write("here.txt", "x");
@@ -98,7 +100,7 @@ test "fileExists answers for a file that is there and one that is not" {
 }
 
 test "readFile reports a missing file rather than returning nothing" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -106,14 +108,14 @@ test "readFile reports a missing file rather than returning nothing" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     try testing.expectError(error.FileNotFound, files.readFile(io, allocator, try temporary.join(allocator, "gone.txt")));
 }
 
 test "makeDirPath creates every directory in the path" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
@@ -121,7 +123,7 @@ test "makeDirPath creates every directory in the path" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     defer temporary.destroy();
 
     const deep = try temporary.join(allocator, "a/b/c");
@@ -133,13 +135,13 @@ test "makeDirPath creates every directory in the path" {
 }
 
 test "TemporaryDir gives each caller its own directory" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
 
-    var first = try files.TemporaryDir.create(io);
+    var first = try TemporaryDir.create(io);
     defer first.destroy();
-    var second = try files.TemporaryDir.create(io);
+    var second = try TemporaryDir.create(io);
     defer second.destroy();
 
     try testing.expect(!std.mem.eql(u8, first.path, second.path));
@@ -173,9 +175,9 @@ test "TemporaryDir from two threads get distinct directories" {
 
     const Worker = struct {
         fn run(slot: *Slot) void {
-            var test_io = files.TestIo.init();
+            var test_io = TestIo.init();
             defer test_io.deinit();
-            var dir = files.TemporaryDir.create(test_io.io()) catch return;
+            var dir = TemporaryDir.create(test_io.io()) catch return;
             defer dir.destroy();
             dir.write("marker.txt", "x") catch return;
             if (!dir.has("marker.txt")) {

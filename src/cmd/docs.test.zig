@@ -5,23 +5,29 @@
 const std = @import("std");
 const add = @import("add.zig");
 const docs = @import("docs.zig");
-const harness = @import("../lib/test/harness.zig");
+const harness = @import("../lib/test/harness.test.zig");
 const init = @import("init.zig");
 const shared = @import("shared.zig");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 test "docs opens the Pages URL when interactive" {
     var scenario = try harness.Scenario.create();
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{ .repo = "acme/skills", .namespace = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
+        .repo = "acme/skills",
+        .namespace = "demo",
+    })));
 
     scenario.clear();
     const ctx = scenario.contextInteractive(false);
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "acme/skills",
+    })));
 
     try testing.expectEqual(@as(usize, 1), scenario.browser.opens);
     try testing.expect(scenario.browser.argv.len >= 2);
@@ -42,7 +48,9 @@ test "docs SKL_BROWSER argv uses that path" {
     );
 
     const ctx = scenario.contextInteractive(false);
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "acme/skills",
+    })));
 
     try testing.expectEqual(@as(usize, 2), scenario.browser.argv.len);
     try testing.expectEqualStrings("/tmp/skl-browser-stub", scenario.browser.argv[0]);
@@ -61,8 +69,8 @@ test "docs menu is skipped when non-interactive without a name" {
     );
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, docs.run(&ctx, .{}));
-    try testing.expect(std.mem.indexOf(u8, scenario.fail.text(), "non-interactive") != null);
+    const why = try expect_result.failed(try docs.run(&ctx, .{}));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "non-interactive") != null);
     try testing.expectEqual(@as(usize, 0), scenario.browser.opens);
 }
 
@@ -78,7 +86,9 @@ test "docs missing clone still opens Pages when interactive" {
     );
 
     const ctx = scenario.contextInteractive(false);
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "acme/skills",
+    })));
     try testing.expectEqual(@as(usize, 1), scenario.browser.opens);
     try testing.expectEqualStrings("https://acme.github.io/skills/", scenario.browser.argv[scenario.browser.argv.len - 1]);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "demo:hello") == null);
@@ -96,7 +106,7 @@ test "docs interactive menu selects by number then opens Pages" {
     );
     scenario.stdin_bytes = "1\n";
     const ctx = scenario.contextInteractive(false);
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{})));
     try testing.expectEqual(@as(usize, 1), scenario.browser.opens);
     try testing.expectEqualStrings("https://acme.github.io/skills/", scenario.browser.argv[scenario.browser.argv.len - 1]);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "acme/skills") != null);
@@ -113,7 +123,9 @@ test "docs non-interactive does not open a browser" {
         \\
     );
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "acme/skills" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "acme/skills",
+    })));
     try testing.expectEqual(@as(usize, 0), scenario.browser.opens);
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "github.io") != null);
 }
@@ -150,8 +162,10 @@ test "docs without config errors" {
     defer scenario.destroy();
 
     const ctx = scenario.context();
-    try testing.expectError(error.Failed, docs.run(&ctx, .{ .query = "acme/skills" }));
-    try testing.expectEqualStrings("No skl.yaml here; run skl init.", scenario.fail.text());
+    const why = try expect_result.failed(try docs.run(&ctx, .{
+        .query = "acme/skills",
+    }));
+    try testing.expectEqualStrings("No skl.yaml here; run skl init.", why.message());
 }
 
 test "docs of a local row prints local and items from that tree" {
@@ -169,7 +183,9 @@ test "docs of a local row prints local and items from that tree" {
     try scenario.writeProjectYaml(yaml);
 
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "demo",
+    })));
     const out = scenario.printed();
     try testing.expect(std.mem.indexOf(u8, out, "Local:") != null);
     try testing.expect(std.mem.indexOf(u8, out, local) != null);
@@ -181,16 +197,18 @@ test "docs of a branch row prints branch" {
     defer scenario.destroy();
 
     const init_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try init.run(&init_ctx, .{}));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try init.run(&init_ctx, .{})));
     const add_ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try add.run(&add_ctx, .{
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try add.run(&add_ctx, .{
         .repo = "acme/skills",
         .namespace = "demo",
         .branch = "feature",
-    }));
+    })));
 
     scenario.clear();
     const ctx = scenario.context();
-    try testing.expectEqual(@as(u8, 0), try docs.run(&ctx, .{ .query = "demo" }));
+    try testing.expectEqual(@as(u8, 0), try expect_result.ok(try docs.run(&ctx, .{
+        .query = "demo",
+    })));
     try testing.expect(std.mem.indexOf(u8, scenario.printed(), "Branch: feature") != null);
 }

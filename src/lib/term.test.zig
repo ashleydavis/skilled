@@ -124,7 +124,10 @@ test "nonInteractive is true when stdin is not a TTY" {
 }
 
 test "marks carry no escape when color is off" {
-    const style = term.Style{ .color = false, .icons = false };
+    const style = term.Style{
+        .color = false,
+        .icons = false,
+    };
     try testing.expectEqualStrings("OK", style.check());
     try testing.expectEqualStrings("X", style.cross());
     try testing.expectEqualStrings("->", style.arrow());

@@ -43,48 +43,64 @@ pub const Remote = struct {
 };
 
 //
-// Parses `owner/repo` or `git@host:owner/repo` into a Remote, or records why the spec is refused.
+// Parses `owner/repo` or `git@host:owner/repo` into a Remote, or the failure that says why the spec
+// is refused.
 //
 // `owner/repo` becomes `git@github.com:owner/repo.git`. An SSH spec is kept as-is for cloning.
 // Invalid names fail before any URL is built.
 //
-pub fn parse(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
+pub fn parse(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Remote) {
     if (spec.len == 0) {
-        return fail.set("Remote is empty; expected owner/repo or git@host:owner/repo.", .{});
+        return .{
+            .failed = failure.because("Remote is empty; expected owner/repo or git@host:owner/repo.", .{}),
+        };
     }
     if (startsWithIgnoreCase(spec, "https://") or startsWithIgnoreCase(spec, "http://")) {
-        return fail.set("HTTPS remotes are not supported; use owner/repo or git@host:owner/repo.", .{});
+        return .{
+            .failed = failure.because("HTTPS remotes are not supported; use owner/repo or git@host:owner/repo.", .{}),
+        };
     }
     if (startsWithIgnoreCase(spec, "github:")) {
-        return fail.set("Remotes of the form `github:` are not supported; use owner/repo or git@host:owner/repo.", .{});
+        return .{
+            .failed = failure.because("Remotes of the form `github:` are not supported; use owner/repo or git@host:owner/repo.", .{}),
+        };
     }
     if (isFilesystemPath(spec)) {
-        return fail.set("Filesystem paths are not supported; use owner/repo or git@host:owner/repo.", .{});
+        return .{
+            .failed = failure.because("Filesystem paths are not supported; use owner/repo or git@host:owner/repo.", .{}),
+        };
     }
     if (std.mem.startsWith(u8, spec, "git@")) {
-        return parseSsh(allocator, spec, fail);
+        return parseSsh(allocator, spec);
     }
-    return parseShorthand(allocator, spec, fail);
+    return parseShorthand(allocator, spec);
 }
 
 //
 // The shared rule for host labels, owner, repo, and (in later steps) namespace.
 //
-// Pub so tests and later link/`--ns` code share one check: a rejected name never becomes a
-// directory under `skills/` or the store.
+// Pub so later link/`--ns` code share one check: a rejected name never becomes a directory under
+// `skills/` or the store.
 //
-pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) failure.Error!void {
+pub fn validateName(name: []const u8, what: []const u8) failure.Result(void) {
     if (name.len == 0) {
-        return fail.set("Invalid {s}: it is empty.", .{what});
+        return .{
+            .failed = failure.because("Invalid {s}: it is empty.", .{what}),
+        };
     }
     if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) {
-        return fail.set("Invalid {s} '{s}': '.' and '..' are not allowed.", .{ what, name });
+        return .{
+            .failed = failure.because("Invalid {s} '{s}': '.' and '..' are not allowed.", .{ what, name }),
+        };
     }
     for (name) |c| {
         if (!isNameChar(c)) {
-            return fail.set("Invalid {s} '{s}': it must match [A-Za-z0-9._-]+.", .{ what, name });
+            return .{
+                .failed = failure.because("Invalid {s} '{s}': it must match [A-Za-z0-9._-]+.", .{ what, name }),
+            };
         }
     }
+    return .ok;
 }
 
 //
@@ -93,85 +109,163 @@ pub fn validateName(name: []const u8, what: []const u8, fail: *failure.Failure) 
 // Pub so clone, the store path, and `--branch` share one check: a dash-prefixed name cannot become a git
 // flag, and `feature/foo` is accepted.
 //
-pub fn validateBranch(name: []const u8, fail: *failure.Failure) failure.Error!void {
+pub fn validateBranch(name: []const u8) failure.Result(void) {
     if (name.len == 0) {
-        return fail.set("Invalid branch: it is empty.", .{});
+        return .{
+            .failed = failure.because("Invalid branch: it is empty.", .{}),
+        };
     }
     if (std.ascii.eqlIgnoreCase(name, "HEAD")) {
-        return fail.set("Invalid branch '{s}'.", .{name});
+        return .{
+            .failed = failure.because("Invalid branch '{s}'.", .{name}),
+        };
     }
     if (name[0] == '-') {
-        return fail.set("Invalid branch '{s}': it must not start with '-'.", .{name});
+        return .{
+            .failed = failure.because("Invalid branch '{s}': it must not start with '-'.", .{name}),
+        };
     }
     for (name) |c| {
         if (c == '\\' or c == ':' or c == '<' or c == '>' or c == '"' or c == '|' or c == '?' or c == '*') {
-            return fail.set("Invalid branch '{s}'.", .{name});
+            return .{
+                .failed = failure.because("Invalid branch '{s}'.", .{name}),
+            };
         }
     }
     if (name[0] == '/' or name[name.len - 1] == '/') {
-        return fail.set("Invalid branch '{s}'.", .{name});
+        return .{
+            .failed = failure.because("Invalid branch '{s}'.", .{name}),
+        };
     }
     var segments = std.mem.splitScalar(u8, name, '/');
     while (segments.next()) |segment| {
         if (segment.len == 0) {
-            return fail.set("Invalid branch '{s}'.", .{name});
+            return .{
+                .failed = failure.because("Invalid branch '{s}'.", .{name}),
+            };
         }
-        try validateName(segment, "branch", fail);
+        switch (validateName(segment, "branch")) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
-}fn parseSsh(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
+    return .ok;
+}
+
+//
+// `git@host:owner/repo` or `git@host:owner/repo.git`, kept as the clone URL once host, owner and
+// repo pass their checks. A spec that does not start with `git@` is refused.
+//
+pub fn parseSsh(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Remote) {
+    if (!std.mem.startsWith(u8, spec, "git@")) {
+        return .{
+            .failed = failure.because("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec}),
+        };
+    }
     const rest = spec["git@".len..];
     const colon = std.mem.indexOfScalar(u8, rest, ':') orelse {
-        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec}),
+        };
     };
     const host = rest[0..colon];
     const path = rest[colon + 1 ..];
     const slash = std.mem.indexOfScalar(u8, path, '/') orelse {
-        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec}),
+        };
     };
     if (std.mem.indexOfScalar(u8, path[slash + 1 ..], '/') != null) {
-        return fail.set("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid SSH remote '{s}'; expected git@host:owner/repo.", .{spec}),
+        };
     }
     const owner = path[0..slash];
     const repo = stripGitSuffix(path[slash + 1 ..]);
-    try validateHost(host, fail);
-    try validateName(owner, "owner", fail);
-    try validateName(repo, "repo", fail);
-    return try ownedRemote(allocator, spec, host, owner, repo);
+    switch (validateHost(host)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (validateName(owner, "owner")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (validateName(repo, "repo")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return .{
+        .ok = try ownedRemote(allocator, spec, host, owner, repo),
+    };
 }
 
 //
 // `owner/repo` or `owner/repo.git` → clone URL `git@github.com:owner/repo.git`.
 //
-fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8, fail: *failure.Failure) failure.Error!Remote {
+fn parseShorthand(allocator: std.mem.Allocator, spec: []const u8) std.mem.Allocator.Error!failure.Result(Remote) {
     const slash = std.mem.indexOfScalar(u8, spec, '/') orelse {
-        return fail.set("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec}),
+        };
     };
     if (std.mem.indexOfScalar(u8, spec[slash + 1 ..], '/') != null) {
-        return fail.set("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec});
+        return .{
+            .failed = failure.because("Invalid remote '{s}'; expected owner/repo or git@host:owner/repo.", .{spec}),
+        };
     }
     const owner = spec[0..slash];
     const repo = stripGitSuffix(spec[slash + 1 ..]);
-    try validateName(owner, "owner", fail);
-    try validateName(repo, "repo", fail);
+    switch (validateName(owner, "owner")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (validateName(repo, "repo")) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
     const clone_url = try std.fmt.allocPrint(allocator, "git@github.com:{s}/{s}.git", .{ owner, repo });
     errdefer allocator.free(clone_url);
-    return try ownedParts(allocator, clone_url, "github.com", owner, repo);
+    return .{
+        .ok = try ownedParts(allocator, clone_url, "github.com", owner, repo),
+    };
 }
 
 //
 // Each host label is checked with the same rule as owner/repo; dots only separate labels.
 //
-fn validateHost(host: []const u8, fail: *failure.Failure) failure.Error!void {
+fn validateHost(host: []const u8) failure.Result(void) {
     if (host.len == 0) {
-        return fail.set("Invalid host: it is empty.", .{});
+        return .{
+            .failed = failure.because("Invalid host: it is empty.", .{}),
+        };
     }
     var labels = std.mem.splitScalar(u8, host, '.');
     while (labels.next()) |label| {
         if (label.len == 0) {
-            return fail.set("Invalid host '{s}': it has an empty label.", .{host});
+            return .{
+                .failed = failure.because("Invalid host '{s}': it has an empty label.", .{host}),
+            };
         }
-        try validateName(label, "host", fail);
+        switch (validateName(label, "host")) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     }
+    return .ok;
 }
 
 //
@@ -183,7 +277,7 @@ fn ownedParts(
     host: []const u8,
     owner: []const u8,
     repo: []const u8,
-) failure.Error!Remote {
+) std.mem.Allocator.Error!Remote {
     const host_owned = try allocator.dupe(u8, host);
     errdefer allocator.free(host_owned);
     const owner_owned = try allocator.dupe(u8, owner);
@@ -206,7 +300,7 @@ fn ownedRemote(
     host: []const u8,
     owner: []const u8,
     repo: []const u8,
-) failure.Error!Remote {
+) std.mem.Allocator.Error!Remote {
     const clone_url = try allocator.dupe(u8, spec);
     errdefer allocator.free(clone_url);
     return try ownedParts(allocator, clone_url, host, owner, repo);
@@ -223,9 +317,13 @@ fn stripGitSuffix(name: []const u8) []const u8 {
 }
 
 //
-// Absolute, drive-letter, relative, `file:`, and `~` paths, so they never parse as owner/repo.
+// Absolute, drive-letter, relative, `file:`, and `~` paths, so they never parse as owner/repo. An
+// empty spec names no path.
 //
-fn isFilesystemPath(spec: []const u8) bool {
+pub fn isFilesystemPath(spec: []const u8) bool {
+    if (spec.len == 0) {
+        return false;
+    }
     if (spec[0] == '/' or spec[0] == '\\' or spec[0] == '~') {
         return true;
     }

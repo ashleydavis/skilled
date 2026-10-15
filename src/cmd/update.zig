@@ -20,6 +20,11 @@ const shared = @import("shared.zig");
 const commander = skilled.commander;
 
 //
+// How a refused command says why: the failure returned in place of the exit code.
+//
+const failure = skilled.failure;
+
+//
 // YAML rewrite when `--branch` or `--local` changes a row's source.
 //
 const config = skilled.config;
@@ -72,89 +77,173 @@ pub const Args = struct {
 //
 // Updates one package or every package in the active YAML.
 //
-pub fn run(ctx: *const Context, args: Args) skilled.failure.Error!u8 {
+pub fn run(ctx: *const Context, args: Args) std.mem.Allocator.Error!failure.Result(u8) {
     const scope = try shared.scopeOf(ctx, args.global);
-    const file = try shared.requireConfig(ctx, scope.config_path);
+    const file = switch (try shared.requireConfig(ctx, scope.config_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
 
     if (args.branch != null and args.local != null) {
-        return ctx.fail.set("The --branch flag cannot be used with --local.", .{});
+        return .{
+            .failed = failure.because("The --branch flag cannot be used with --local.", .{}),
+        };
     }
     if (args.branch != null or args.local != null) {
         const q = args.query orelse {
             if (args.branch != null) {
-                return ctx.fail.set("The update --branch flag requires a package query.", .{});
+                return .{
+                    .failed = failure.because("The update --branch flag requires a package query.", .{}),
+                };
             }
-            return ctx.fail.set("The update --local flag requires a package query.", .{});
+            return .{
+                .failed = failure.because("The update --local flag requires a package query.", .{}),
+            };
         };
-        const matched = try shared.requireOneMatch(ctx.allocator, file.packages, q, ctx.fail);
+        const matched = switch (try shared.requireOneMatch(ctx.allocator, file.packages, q)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
         if (args.local) |local_path| {
-            try switchToLocal(ctx, scope, file, matched, local_path);
+            switch (try switchToLocal(ctx, scope, file, matched, local_path)) {
+                .ok => {},
+                .failed => |why| return .{
+                    .failed = why,
+                },
+            }
         } else {
-            try switchToBranch(ctx, scope, file, matched, args.branch.?);
+            switch (try switchToBranch(ctx, scope, file, matched, args.branch.?)) {
+                .ok => {},
+                .failed => |why| return .{
+                    .failed = why,
+                },
+            }
         }
-        return 0;
+        return .{
+            .ok = 0,
+        };
     }
 
     //
     // Without the source flags this is the "repair missing links" command, so the scratch links are
     // repaired too. `--branch` and `--local` are about one named package and leave it alone.
     //
-    try shared.syncScratch(ctx, scope);
+    switch (try shared.syncScratch(ctx, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
 
     if (args.query) |q| {
-        const matched = try shared.requireOneMatch(ctx.allocator, file.packages, q, ctx.fail);
-        try updateOne(ctx, scope, matched.pkg);
-        return 0;
+        const matched = switch (try shared.requireOneMatch(ctx.allocator, file.packages, q)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
+        switch (try updateOne(ctx, scope, matched.pkg)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
+        return .{
+            .ok = 0,
+        };
     }
 
     for (file.packages) |pkg| {
-        var one_fail = skilled.failure.Failure.init(ctx.allocator);
-        var one_ctx = ctx.*;
-        one_ctx.fail = &one_fail;
-        updateOne(&one_ctx, scope, pkg) catch {
-            return ctx.fail.set("Update failed on {s}: {s}", .{ pkg.repo, one_fail.text() });
-        };
+        switch (try updateOne(ctx, scope, pkg)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = failure.because("Update failed on {s}: {s}", .{ pkg.repo, why.message() }),
+            },
+        }
     }
-    return 0;
+    return .{
+        .ok = 0,
+    };
 }
 
 //
 // Builds the `update` command.
 //
-pub fn buildCommand(ctx: *const Context) *Command {
-    return Command.init(ctx.allocator, "update")
+pub fn buildCommand(ctx: *const Context) std.mem.Allocator.Error!*Command {
+    const command = (try Command.init(ctx.allocator, "update"))
         .description("Fast-forward store clones and repair links.")
         .argument("[repo]", "One package, or every package when omitted.")
-        .option("--branch <name>", "Check out this branch and relink the store.", null)
-        .option("--local <path>", "Link a local working tree instead of the store.", null)
         .action(ctx, action);
+    try command.option("--branch <name>", "Check out this branch and relink the store.", null);
+    try command.option("--local <path>", "Link a local working tree instead of the store.", null);
+    return command;
 }
 
 //
 // fetchUpdate, print SHA change, then linkPackage — or repair a `local:` row with no fetch.
 //
-fn updateOne(ctx: *const Context, scope: skilled.paths.Scope, pkg: skilled.config.Package) skilled.failure.Error!void {
+fn updateOne(ctx: *const Context, scope: skilled.paths.Scope, pkg: skilled.config.Package) std.mem.Allocator.Error!failure.Result(void) {
     if (pkg.local) |local_path| {
-        const dest = try shared.resolveLocal(ctx, local_path);
-        _ = try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
-        try shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
-        try shared.identifier(ctx, pkg.repo),
-        try shared.muted(ctx, dest),
-    });
-        return;
+        const dest = switch (try shared.resolveLocal(ctx, local_path)) {
+            .ok => |got| got,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        };
+        switch (try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope)) {
+            .ok => {},
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
+        return shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
+            try shared.identifier(ctx, pkg.repo),
+            try shared.muted(ctx, dest),
+        });
     }
 
-    const resolved = try shared.resolveStore(ctx, pkg.repo, pkg.branch);
+    const resolved = switch (try shared.resolveStore(ctx, pkg.repo, pkg.branch)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     if (!shared.dirExists(ctx.io, resolved.dest)) {
-        return ctx.fail.set("Package {s} is not installed; run skl install.", .{pkg.repo});
+        return .{
+            .failed = failure.because("Package {s} is not installed; run skl install.", .{pkg.repo}),
+        };
     }
 
-    const old_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
-    try git.fetchUpdate(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
-    const new_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
+    const old_sha = switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (try git.fetchUpdate(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    const new_sha = switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
 
-    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
-    try printShaLine(ctx, pkg.repo, old_sha, new_sha);
+    switch (try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return printShaLine(ctx, pkg.repo, old_sha, new_sha);
 }
 
 //
@@ -166,15 +255,35 @@ fn switchToLocal(
     file: config.File,
     matched: shared.Match,
     local_path: []const u8,
-) skilled.failure.Error!void {
-    const dest = try shared.resolveLocal(ctx, local_path);
+) std.mem.Allocator.Error!failure.Result(void) {
+    const dest = switch (try shared.resolveLocal(ctx, local_path)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     var pkg = matched.pkg;
     pkg.local = dest;
     pkg.branch = null;
-    const rewritten = try replacePackage(ctx.allocator, file, matched.index, pkg);
-    try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten, ctx.fail);
-    _ = try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope, ctx.fail);
-    try shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
+    const rewritten = replacePackage(ctx.allocator, file, matched.index, pkg) catch |err| switch (err) {
+        error.IndexNotFound => return .{
+            .failed = failure.because("The package to update is no longer in {s}.", .{scope.config_path}),
+        },
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try link.linkPackage(ctx.io, ctx.allocator, dest, pkg.namespace, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    return shared.line(ctx, "{s} is linked to the local tree at {s}.", .{
         try shared.identifier(ctx, pkg.repo),
         try shared.muted(ctx, dest),
     });
@@ -193,52 +302,102 @@ fn switchToBranch(
     file: config.File,
     matched: shared.Match,
     branch: []const u8,
-) skilled.failure.Error!void {
-    const old_dest = try shared.contentDir(ctx, matched.pkg);
+) std.mem.Allocator.Error!failure.Result(void) {
+    const old_dest = switch (try shared.contentDir(ctx, matched.pkg)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
     const old_sha: ?[]const u8 = if (shared.dirExists(ctx.io, old_dest))
-        try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, old_dest, ctx.fail)
+        switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, old_dest)) {
+            .ok => |sha| sha,
+            .failed => |why| return .{
+                .failed = why,
+            },
+        }
     else
         null;
 
     var spinner = shared.newSpinner(ctx);
     defer spinner.finish();
-    const resolved = try shared.ensureCloned(ctx, matched.pkg.repo, branch, &spinner);
-    _ = try skilled.package.scan(ctx.io, ctx.allocator, resolved.dest, ctx.fail);
+    const resolved = switch (try shared.ensureCloned(ctx, matched.pkg.repo, branch, &spinner)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    switch (try skilled.package.scan(ctx.io, ctx.allocator, resolved.dest)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
 
     var pkg = matched.pkg;
     pkg.branch = branch;
     pkg.local = null;
-    const rewritten = try replacePackage(ctx.allocator, file, matched.index, pkg);
-    try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten, ctx.fail);
-    try link.unlinkPackage(ctx.io, ctx.allocator, old_dest, pkg.namespace, scope, ctx.fail);
-    _ = try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope, ctx.fail);
-
-    const new_sha = try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest, ctx.fail);
-    if (old_sha) |old| {
-        try printShaLine(ctx, pkg.repo, old, new_sha);
-    } else {
-        try shared.line(ctx, "{s} is at {s}.", .{
-            try shared.identifier(ctx, pkg.repo),
-            try shared.muted(ctx, shared.shortSha(new_sha)),
-        });
+    const rewritten = replacePackage(ctx.allocator, file, matched.index, pkg) catch |err| switch (err) {
+        error.IndexNotFound => return .{
+            .failed = failure.because("The package to update is no longer in {s}.", .{scope.config_path}),
+        },
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    switch (try config.writeFile(ctx.io, ctx.allocator, scope.config_path, rewritten)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
     }
+    switch (try link.unlinkPackage(ctx.io, ctx.allocator, old_dest, pkg.namespace, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+    switch (try link.linkPackage(ctx.io, ctx.allocator, resolved.dest, pkg.namespace, scope)) {
+        .ok => {},
+        .failed => |why| return .{
+            .failed = why,
+        },
+    }
+
+    const new_sha = switch (try git.headSha(ctx.io, ctx.allocator, ctx.environ, ctx.git, resolved.dest)) {
+        .ok => |got| got,
+        .failed => |why| return .{
+            .failed = why,
+        },
+    };
+    if (old_sha) |old| {
+        return printShaLine(ctx, pkg.repo, old, new_sha);
+    }
+    return shared.line(ctx, "{s} is at {s}.", .{
+        try shared.identifier(ctx, pkg.repo),
+        try shared.muted(ctx, shared.shortSha(new_sha)),
+    });
 }
 
 //
-// Copies file.packages and replaces the entry at index.
+// Copies file.packages and replaces the entry at index. An index past the end names no entry and is
+// refused with `error.IndexNotFound`, before anything is allocated.
 //
-fn replacePackage(
+pub fn replacePackage(
     allocator: std.mem.Allocator,
     file: config.File,
     index: usize,
     pkg: config.Package,
-) std.mem.Allocator.Error!config.File {
+) (error{IndexNotFound} || std.mem.Allocator.Error)!config.File {
+    if (index >= file.packages.len) {
+        return error.IndexNotFound;
+    }
     const packages = try allocator.alloc(config.Package, file.packages.len);
     for (file.packages, 0..) |existing, i| {
         packages[i] = existing;
     }
     packages[index] = pkg;
-    return .{ .packages = packages };
+    return .{
+        .packages = packages,
+    };
 }
 
 //
@@ -253,12 +412,11 @@ fn printShaLine(
     repo: []const u8,
     old_sha: []const u8,
     new_sha: []const u8,
-) skilled.failure.Error!void {
+) std.mem.Allocator.Error!failure.Result(void) {
     if (std.mem.eql(u8, old_sha, new_sha)) {
-        try shared.line(ctx, "{s} is already up to date.", .{try shared.identifier(ctx, repo)});
-        return;
+        return shared.line(ctx, "{s} is already up to date.", .{try shared.identifier(ctx, repo)});
     }
-    try shared.line(ctx, "{s} updated {s} {s} {s}.", .{
+    return shared.line(ctx, "{s} updated {s} {s} {s}.", .{
         try shared.identifier(ctx, repo),
         try shared.muted(ctx, shared.shortSha(old_sha)),
         ctx.style.arrow(),
@@ -269,9 +427,9 @@ fn printShaLine(
 //
 // Unpacks Commander options and runs update.
 //
-fn action(invocation: *commander.Invocation) anyerror!void {
+fn action(invocation: *const commander.Invocation) std.mem.Allocator.Error!failure.Result(u8) {
     const ctx: *const Context = @ptrCast(@alignCast(invocation.context));
-    invocation.exit_code = try run(ctx, .{
+    return run(ctx, .{
         .global = invocation.option("global") != null,
         .query = if (invocation.args.len > 0) invocation.args[0] else null,
         .branch = invocation.option("branch"),

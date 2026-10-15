@@ -39,21 +39,27 @@ pub fn newArray(allocator: std.mem.Allocator) Array {
 // of union initialisers.
 //
 pub fn str(text: []const u8) Value {
-    return .{ .string = text };
+    return .{
+        .string = text,
+    };
 }
 
 //
 // Wraps a boolean as a value.
 //
 pub fn boolean(value: bool) Value {
-    return .{ .bool = value };
+    return .{
+        .bool = value,
+    };
 }
 
 //
 // Wraps a whole number as a value.
 //
 pub fn int(value: i64) Value {
-    return .{ .integer = value };
+    return .{
+        .integer = value,
+    };
 }
 
 //

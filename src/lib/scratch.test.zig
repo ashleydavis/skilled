@@ -5,9 +5,12 @@
 const std = @import("std");
 const failure = @import("failure.zig");
 const files = @import("files.zig");
+const TemporaryDir = @import("test_disk").TemporaryDir;
+const TestIo = @import("test_disk").TestIo;
 const paths = @import("paths.zig");
 const scratch = @import("scratch.zig");
 const testing = std.testing;
+const expect_result = @import("expect_result");
 
 //
 // A project scope and a global scope rooted in one TemporaryDir, so tests stay isolated.
@@ -16,7 +19,7 @@ const Fixture = struct {
     //
     // Thrown away when the test ends. Every path below lives inside it.
     //
-    temporary: files.TemporaryDir,
+    temporary: TemporaryDir,
 
     //
     // Project scope: agent roots and scratch under `<temporary>/project`.
@@ -33,7 +36,7 @@ const Fixture = struct {
 // Builds the two scopes over empty project and home directories.
 //
 fn makeFixture(io: std.Io, allocator: std.mem.Allocator) !Fixture {
-    var temporary = try files.TemporaryDir.create(io);
+    var temporary = try TemporaryDir.create(io);
     errdefer temporary.destroy();
 
     const home = try temporary.join(allocator, "home");
@@ -53,7 +56,9 @@ fn makeFixture(io: std.Io, allocator: std.mem.Allocator) !Fixture {
 // a Windows `\` does not fail a correct link.
 //
 fn expectSymlink(io: std.Io, path: []const u8, dest: []const u8) !void {
-    const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    });
     try testing.expectEqual(std.Io.File.Kind.sym_link, st.kind);
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const n = try std.Io.Dir.cwd().readLink(io, path, &buffer);
@@ -64,7 +69,9 @@ fn expectSymlink(io: std.Io, path: []const u8, dest: []const u8) !void {
 // True when nothing exists at path, following no symlink.
 //
 fn missing(io: std.Io, path: []const u8) bool {
-    _ = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch return true;
+    _ = std.Io.Dir.cwd().statFile(io, path, .{
+        .follow_symlinks = false,
+    }) catch return true;
     return false;
 }
 
@@ -104,7 +111,7 @@ test "scratch isReserved matches only the exact namespace" {
 }
 
 test "scratch ensureTrees creates both trees and the parents above them" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -113,9 +120,8 @@ test "scratch ensureTrees creates both trees and the parents above them" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try expect_result.ok(try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir));
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     const commands = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" });
@@ -124,7 +130,7 @@ test "scratch ensureTrees creates both trees and the parents above them" {
 }
 
 test "scratch ensureTrees twice leaves the trees and their files alone" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -133,19 +139,18 @@ test "scratch ensureTrees twice leaves the trees and their files alone" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try expect_result.ok(try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir));
     const skill_path = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills", "hello", "SKILL.md" });
     try files.makeParentDir(io, skill_path);
     try files.writeFile(io, skill_path, "Hello.\n");
 
-    _ = try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail);
+    _ = try expect_result.ok(try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir));
     try testing.expect(files.fileExists(io, skill_path));
 }
 
 test "scratch ensureTrees refuses a regular file where a tree belongs" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -154,18 +159,17 @@ test "scratch ensureTrees refuses a regular file where a tree belongs" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     try files.makeDirPath(io, fixture.project.scratch_dir);
     try files.writeFile(io, skills, "not a directory\n");
 
-    try testing.expectError(error.Failed, scratch.ensureTrees(io, allocator, fixture.project.scratch_dir, &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "skills") != null);
+    const why = try expect_result.failed(try scratch.ensureTrees(io, allocator, fixture.project.scratch_dir));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "skills") != null);
 }
 
 test "scratch sync links both trees into the project agent roots" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -174,9 +178,8 @@ test "scratch sync links both trees into the project agent roots" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     const commands = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" });
@@ -188,7 +191,7 @@ test "scratch sync links both trees into the project agent roots" {
 }
 
 test "scratch sync of a global scope leaves the project roots alone" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -197,9 +200,8 @@ test "scratch sync of a global scope leaves the project roots alone" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.global, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.global));
 
     const global_links = try linkPaths(allocator, fixture.global);
     const project_links = try linkPaths(allocator, fixture.project);
@@ -210,7 +212,7 @@ test "scratch sync of a global scope leaves the project roots alone" {
 }
 
 test "scratch sync twice is idempotent" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -219,17 +221,16 @@ test "scratch sync twice is idempotent" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
 
     const links = try linkPaths(allocator, fixture.project);
     try expectSymlink(io, links[3], try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "commands" }));
 }
 
 test "scratch sync restores a deleted namespace link" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -238,14 +239,13 @@ test "scratch sync restores a deleted namespace link" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
     const links = try linkPaths(allocator, fixture.project);
     try removeLink(io, links[2]);
     try testing.expect(missing(io, links[2]));
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
 
     const skills = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills" });
     try expectSymlink(io, links[2], skills);
@@ -253,7 +253,7 @@ test "scratch sync restores a deleted namespace link" {
 }
 
 test "scratch sync refuses a real file at a namespace link path" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -262,18 +262,17 @@ test "scratch sync refuses a real file at a namespace link path" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
     const links = try linkPaths(allocator, fixture.project);
     try files.makeDirPath(io, fixture.project.claude_skills);
     try files.writeFile(io, links[2], "not a link\n");
 
-    try testing.expectError(error.Failed, scratch.sync(io, allocator, fixture.project, &fail));
-    try testing.expect(std.mem.indexOf(u8, fail.text(), "will not overwrite") != null);
+    const why = try expect_result.failed(try scratch.sync(io, allocator, fixture.project));
+    try testing.expect(std.mem.indexOf(u8, why.message(), "will not overwrite") != null);
 }
 
 test "scratch sync makes a scratch skill readable through the agent link" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -282,9 +281,8 @@ test "scratch sync makes a scratch skill readable through the agent link" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
     const written = try files.joinPath(allocator, &.{ fixture.project.scratch_dir, "skills", "hello", "SKILL.md" });
     try files.makeParentDir(io, written);
     try files.writeFile(io, written, "Scratch hello.\n");
@@ -294,7 +292,7 @@ test "scratch sync makes a scratch skill readable through the agent link" {
 }
 
 test "scratch sync reports a first run as changed and a repeat as unchanged" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -303,14 +301,13 @@ test "scratch sync reports a first run as changed and a repeat as unchanged" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    try testing.expectEqual(scratch.Status.changed, try scratch.sync(io, allocator, fixture.project, &fail));
-    try testing.expectEqual(scratch.Status.unchanged, try scratch.sync(io, allocator, fixture.project, &fail));
+    try testing.expectEqual(scratch.Status.changed, try expect_result.ok(try scratch.sync(io, allocator, fixture.project)));
+    try testing.expectEqual(scratch.Status.unchanged, try expect_result.ok(try scratch.sync(io, allocator, fixture.project)));
 }
 
 test "scratch sync reports a repaired link as changed" {
-    var test_io = files.TestIo.init();
+    var test_io = TestIo.init();
     defer test_io.deinit();
     const io = test_io.io();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -319,12 +316,11 @@ test "scratch sync reports a repaired link as changed" {
 
     var fixture = try makeFixture(io, allocator);
     defer fixture.temporary.destroy();
-    var fail = failure.Failure.init(allocator);
 
-    _ = try scratch.sync(io, allocator, fixture.project, &fail);
+    _ = try expect_result.ok(try scratch.sync(io, allocator, fixture.project));
     const links = try linkPaths(allocator, fixture.project);
     try removeLink(io, links[1]);
 
-    try testing.expectEqual(scratch.Status.changed, try scratch.sync(io, allocator, fixture.project, &fail));
-    try testing.expectEqual(scratch.Status.unchanged, try scratch.sync(io, allocator, fixture.project, &fail));
+    try testing.expectEqual(scratch.Status.changed, try expect_result.ok(try scratch.sync(io, allocator, fixture.project)));
+    try testing.expectEqual(scratch.Status.unchanged, try expect_result.ok(try scratch.sync(io, allocator, fixture.project)));
 }
