@@ -17,8 +17,8 @@
     // of Faultline instead, pass `--fork=<path to the copy>` to `zig build`.
     .dependencies = .{
         .faultline = .{
-            .url = "git+https://github.com/ashleydavis/faultline-zig#04d59eb4d0f4d219ba822f773f8ea80e275e61d8",
-            .hash = "faultline-0.0.0-WIokojKdEwCvt_Tu3KzEITN9itVnl9WrM-68EggKqZNK",
+            .url = "git+https://github.com/ashleydavis/faultline-zig#a9e3cbebbedccc9e67d76d88c9383d8433c6c541",
+            .hash = "faultline-0.0.0-WIokonqdEwAWFfsvsVCHCfl-X07ZuHpua9bAw7CL1zK9",
         },
     },
 
